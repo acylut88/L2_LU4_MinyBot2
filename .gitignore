@@ -1,0 +1,14 @@
+# Базовые файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Файлы сред разработки и настроек ОС
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini

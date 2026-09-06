@@ -1,0 +1,884 @@
+
+================================================================================
+ FILE: arduino\arduino_controller_async.py (109 lines)
+================================================================================
+
+import json
+import asyncio
+import aioserial
+
+class AsyncArduinoController:
+    def __init__(self, config_path: str = "config.json"):
+        self.config_path = config_path
+        self.connection = None
+        self.config = self._load_config()
+        
+        # Извлекаем параметры подключения из конфига
+        conn_settings = self.config.get("connection", {})
+        self.port = conn_settings.get("port", "COM4")
+        self.baudrate = conn_settings.get("baudrate", 115200)
+        self.dtr_setting = conn_settings.get("dtr", True)
+        self.rts_setting = conn_settings.get("rts", True)
+        
+        # Извлекаем карту кнопок
+        self.button_map = self.config.get("buttons", {})
+
+    def _load_config(self) -> dict:
+        """Загружает параметры и карту кнопок из JSON."""
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"Ошибка: Файл конфигурации '{self.config_path}' не найден!")
+            return {}
+        except json.JSONDecodeError as e:
+            print(f"Ошибка чтения JSON в '{self.config_path}': {e}")
+            return {}
+
+    async def connect(self) -> bool:
+        """Подключается к порту, используя считанные из JSON параметры."""
+        if not self.button_map:
+            print("Ошибка запуска: Конфигурация пуста или не загружена.")
+            return False
+            
+        try:
+            # Инициализация с динамическими параметрами
+            self.connection = aioserial.AioSerial(
+                port=self.port, 
+                baudrate=self.baudrate,
+                dsrdtr=self.dtr_setting,
+                rtscts=self.rts_setting
+            )
+            
+            # Принудительно выставляем DTR/RTS для Leonardo
+            self.connection.dtr = self.dtr_setting
+            self.connection.rts = self.rts_setting
+            
+            print(f"Порт {self.port} ({self.baudrate}) открыт.")
+            print("Ожидаем инициализацию Leonardo...")
+            
+            # Даем плате время на перезагрузку и запуск setup()
+            await asyncio.sleep(2.5)
+            
+            if self.connection.in_waiting > 0:
+                response = await self.connection.readline_async()
+                decoded = response.decode('utf-8', errors='ignore').strip()
+                print(f"Ответ от платы: {decoded}")
+                print("Успешное подключение! Ардуино готова к работе.")
+            else:
+                print("Плата готова (входящий буфер пуст, линии DTR/RTS активны).")
+                
+            return True
+                
+        except Exception as e:
+            print(f"Ошибка подключения к порту {self.port}: {e}")
+            return False
+
+    async def send_button(self, button_name: str):
+        if not self.connection or not self.connection.is_open:
+            print("Ошибка: Нет активного соединения.")
+            return
+            
+        if button_name in self.button_map:
+            # Переводим символ из JSON в байтовую строку непосредственно при отправке
+            char_to_send = self.button_map[button_name]
+            byte_data = char_to_send.encode('utf-8')
+            
+            await self.connection.write_async(byte_data)
+            print(f"Отправлена команда для кнопки: {button_name} (символ: '{char_to_send}')")
+        else:
+            print(f"Кнопка '{button_name}' отсутствует в файле конфигурации.")
+
+    def close(self):
+        if self.connection and self.connection.is_open:
+            self.connection.close()
+            print("Подключение закрыто.")
+
+async def main():
+    # Класс сам подтянет config.json из текущей директории
+    arduino = AsyncArduinoController() 
+    
+    print(f"Инициализация подключения по конфигу...")
+    if not await arduino.connect():
+        return
+    
+    print("Ждем 3 секунд...")
+    await asyncio.sleep(3) 
+    
+    # проверочная отправка команды для кнопки "1" (символ 'с' в config_arduino.json)
+    await arduino.send_button("1")
+    
+    arduino.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
+ FILE: vision\hp_tracker.py (150 lines)
+================================================================================
+
+import os
+import json
+import numpy as np
+import asyncio
+from vision.screen_capture import ScreenCapturer
+
+class HPTracker:
+    def __init__(self, profile_name="PK_den4ika", check_interval=1.0, consecutive_triggers=3):
+        self.profile_name = profile_name
+        self.check_interval = check_interval
+        self.consecutive_triggers = consecutive_triggers
+        
+        vision_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config_path = os.path.join(os.path.dirname(vision_dir), "config.json")
+        
+        self.start_point = None
+        self.end_point = None
+        self.points = []
+        self.base_colors = []
+        self.points_status = []
+        self.change_counters = {}
+        self.capturer = ScreenCapturer()
+
+    def load_profile(self):
+        if not os.path.exists(self.config_path):
+            return False
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            profile = config.get("profiles", {}).get(self.profile_name)
+            if profile and "start_point" in profile and "end_point" in profile:
+                self.start_point = tuple(profile["start_point"])
+                self.end_point = tuple(profile["end_point"])
+                
+                screen = self.capturer.take_screenshot()
+                screen_bgr = self.capturer.get_bgr_array(screen)
+                self.calculate_points(screen_bgr)
+                return True
+        except Exception as e:
+            print("Ошибка чтения профиля:", e)
+        return False
+
+    def save_profile(self):
+        config = {}
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                pass
+        
+        if "profiles" not in config:
+            config["profiles"] = {}
+            
+        config["profiles"][self.profile_name] = {
+            "start_point": list(self.start_point),
+            "end_point": list(self.end_point)
+        }
+        
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+
+    def calculate_points(self, current_frame):
+        x1, y1 = self.start_point
+        x2, y2 = self.end_point
+        h, w, _ = current_frame.shape
+        
+        self.points = []
+        self.base_colors = []
+        self.points_status = [True] * 5  
+        self.change_counters = {i: 0 for i in range(5)}
+        
+        steps = [0.1, 0.3, 0.5, 0.7, 0.9]
+        delta_x = x2 - x1
+        delta_y = y2 - y1
+        
+        for i, t in enumerate(steps):
+            x = int(x1 + delta_x * t)
+            y = int(y1 + delta_y * t)
+            x = max(0, min(x, w - 1))
+            y = max(0, min(y, h - 1))
+            
+            self.points.append((x, y))
+            raw_bgr = current_frame[y, x]
+            color_rgb = [int(raw_bgr[2]), int(raw_bgr[1]), int(raw_bgr[0])]
+            self.base_colors.append(color_rgb)
+            
+        print(f"5 контрольных точек для {self.profile_name} успешно инициализированы.")
+
+    def calibrate(self):
+        p1, p2, frame_bgr = self.capturer.select_line_on_screen()
+        self.start_point = p1
+        self.end_point = p2
+        self.calculate_points(frame_bgr)
+        self.save_profile()
+
+    def is_color_changed(self, c1, c2, threshold=40):
+        return np.linalg.norm(np.array(c1, dtype=int) - np.array(c2, dtype=int)) > threshold
+
+    def get_current_hp(self):
+        for i in range(4, -1, -1):
+            if self.points_status[i]:
+                return (i + 1) * 20
+        return 0
+
+    async def track_loop(self):
+        print(f"Старт скоростного мониторинга для [{self.profile_name}] БЕЗ дебаг-файлов.")
+        last_log_time = 0.0
+        
+        try:
+            while True:
+                screenshot = self.capturer.take_screenshot()
+                frame_rgb = np.array(screenshot)
+                h, w, _ = frame_rgb.shape
+                
+                status_changed = False
+                
+                for i, (x, y) in enumerate(self.points):
+                    if y >= h or x >= w:
+                        continue
+                        
+                    raw_rgb = frame_rgb[y, x]
+                    curr_color = [int(raw_rgb[0]), int(raw_rgb[1]), int(raw_rgb[2])]
+                    base_color = self.base_colors[i]
+                    
+                    changed = self.is_color_changed(curr_color, base_color)
+                    
+                    if changed:
+                        self.change_counters[i] += 1
+                        if self.change_counters[i] >= self.consecutive_triggers:
+                            if self.points_status[i]:
+                                self.points_status[i] = False
+                                status_changed = True
+                    else:
+                        self.change_counters[i] = 0
+                        if not self.points_status[i]:
+                            self.points_status[i] = True
+                            status_changed = True
+                            
+                curr_time = asyncio.get_event_loop().time()
+                
+                if status_changed or (curr_time - last_log_time >= 1.0):
+                    hp = self.get_current_hp()
+                    visual_status = ["+" if s else "-" for s in self.points_status]
+                    print(f"[{self.profile_name} HP] Здоровье: {hp}% | Точки: {visual_status}")
+                    last_log_time = curr_time
+                    
+                await asyncio.sleep(self.check_interval)
+        except asyncio.CancelledError:
+            print("Мониторинг ХП остановлен.")
+
+
+
+================================================================================
+ FILE: vision\screen_capture.py (80 lines)
+================================================================================
+
+import os
+import time
+import numpy as np
+import tkinter as tk
+from PIL import ImageGrab, ImageTk, ImageDraw
+
+# Фикс масштабирования Windows
+try:
+    from ctypes import windll
+    windll.user32.SetProcessDPIAware()
+except Exception as e:
+    print("DPI Awareness предупреждение:", e)
+
+class ScreenCapturer:
+    @staticmethod
+    def take_screenshot():
+        """Делает полноэкранный снимок пиксель-в-пиксель."""
+        return ImageGrab.grab(all_screens=True)
+
+    @staticmethod
+    def get_bgr_array(screenshot):
+        """Конвертирует PIL Image в массив BGR для OpenCV."""
+        import cv2
+        return cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+
+    def select_line_on_screen(self):
+        """Открывает стабильное окно Tkinter для калибровки линии."""
+        print("Подготовьте ХП-бар в игре. Калибровка через 1 секунду...")
+        time.sleep(1)
+        
+        screenshot = self.take_screenshot()
+        screen_bgr = self.get_bgr_array(screenshot)
+        
+        root = tk.Tk()
+        root.attributes("-fullscreen", True)
+        root.attributes("-topmost", True)
+        
+        canvas = tk.Canvas(root, cursor="cross", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+        
+        tk_img = ImageTk.PhotoImage(screenshot)
+        canvas.create_image(0, 0, anchor="nw", image=tk_img)
+        
+        start_point = None
+        end_point = None
+        current_line = None
+        
+        def on_press(event):
+            nonlocal current_line, start_point
+            start_point = (event.x, event.y)
+            if current_line:
+                canvas.delete(current_line)
+                
+        def on_drag(event):
+            nonlocal current_line
+            if start_point:
+                if current_line:
+                    canvas.delete(current_line)
+                current_line = canvas.create_line(
+                    start_point[0], start_point[1], 
+                    event.x, event.y, 
+                    fill="red", width=2
+                )
+                
+        def on_release(event):
+            nonlocal end_point
+            end_point = (event.x, event.y)
+            root.destroy()
+
+        canvas.bind("<ButtonPress-1>", on_press)
+        canvas.bind("<B1-Motion>", on_drag)
+        canvas.bind("<ButtonRelease-1>", on_release)
+        
+        print("\n=== КАЛИБРОВКА ===")
+        print("Зажмите ЛКМ в начале ХП-бара, протащите до конца и отпустите.")
+        root.mainloop()
+        
+        if start_point and end_point:
+            return start_point, end_point, screen_bgr
+        raise ValueError("Линия калибровки не была начерчена!")
+
+
+
+================================================================================
+ FILE: vision\summoner_combat.py (179 lines)
+================================================================================
+
+import asyncio
+import random
+from vision.hp_tracker import HPTracker
+from vision.target_validator import TargetValidator
+from arduino.arduino_controller_async import AsyncArduinoController
+
+class SummonerCombat:
+    def __init__(self, tracker: HPTracker, validator: TargetValidator, arduino: AsyncArduinoController):
+        """
+        Класс управления боевой логикой сумонера с тактикой удержания спота.
+        """
+        self.tracker = tracker
+        self.validator = validator
+        self.arduino = arduino
+        
+        # Флаг паузы, которым будет управлять BotManager
+        self.is_paused = False
+        
+        # Конфигурация боевых таймингов
+        self.combat_timeout = 20.0       
+        self.search_delay = 0.07         
+        self.empty_spot_delay = 0.5      
+        self.escape_delay = 0.1          
+        self.loot_delay = 0.05           
+        self.pet_tank_delay = 0.5        
+
+    async def start_loop(self):
+        print("\n[Бой] Класс Суммонер успешно запущен. Входим в боевой цикл...")
+        self.tracker.check_interval = 0.1
+        
+        while True:
+            try:
+                if self.is_paused:
+                    await asyncio.sleep(0.2)
+                    continue
+
+                # Шаг 1: Проверяем наличие цели в таргете
+                current_hp = self.tracker.get_current_hp()
+                
+                if current_hp == 0:
+                    if self.is_paused: continue
+                    print("[Поиск] Цели нет. МГНОВЕННЫЙ поиск моба (Нажимаем F2)...")
+                    await self.arduino.send_button("F2")
+                    await asyncio.sleep(self.search_delay)
+                    
+                    current_hp = self.tracker.get_current_hp()
+                    if current_hp == 0:
+                        await asyncio.sleep(self.empty_spot_delay)
+                        continue
+
+                # Шаг 2: Анализ состояния найденной цели
+                print(f"[Таргет] Обнаружена цель. Текущее ХП моба: {current_hp}%")
+                
+                # ЕСЛИ МОБ РАНЕНЫЙ (<100% ХП)
+                if current_hp < 100:
+                    if self.is_paused: continue
+                    print("[Защита] Моб ранен (<100% ХП). Пробуем найти другого (Нажимаем F2)...")
+                    
+                    # Запоминаем текущее ХП раненого моба перед попыткой переключения
+                    last_damaged_hp = current_hp
+                    
+                    # Прожимаем нексттаргет поверх него, чтобы переключить цель
+                    await self.arduino.send_button("F2")
+                    await asyncio.sleep(self.search_delay)
+                    
+                    # Проверяем, изменился ли таргет после нажатия F2
+                    new_hp = self.tracker.get_current_hp()
+                    
+                    # Если таргет остался на том же раненом мобе или спот пуст (новое ХП равно 0 или старому раненому значению)
+                    if new_hp == 0 or new_hp == last_damaged_hp:
+                        print("[Защита] Следующий моб не найден. Включаем режим ожидания (3 сек)...")
+                        
+                        # Запускаем 3-секундный таймер слежения за ХП раненого моба
+                        start_wait = asyncio.get_event_loop().time()
+                        is_someone_attacking = False
+                        
+                        # Возвращаем таргет на этого моба, если он сбросился в 0
+                        if new_hp == 0:
+                            await self.arduino.send_button("F2")
+                            await asyncio.sleep(self.search_delay)
+                        
+                        while asyncio.get_event_loop().time() - start_wait < 3.0:
+                            await asyncio.sleep(0.2)
+                            if self.is_paused: break
+                            
+                            check_hp = self.tracker.get_current_hp()
+                            # Если за эти 3 секунды ХП моба уменьшилось — значит, его точно КТО-ТО БЬЕТ
+                            if check_hp < last_damaged_hp and check_hp > 0:
+                                print(f"[Защита] ХП моба падает ({check_hp}% < {last_damaged_hp}%)! Его бьют. Пропускаем спот...")
+                                is_someone_attacking = True
+                                break
+                            
+                        if self.is_paused: continue
+                        
+                        if is_someone_attacking:
+                            # Если моба бьют, сбрасываем его через Esc и уходим спать на пустой спот
+                            await self.arduino.send_button("Esc")
+                            await asyncio.sleep(self.empty_spot_delay)
+                            continue
+                        else:
+                            # Если за 3 секунды ХП не упало — моб наш (агр или реген). Идем атаковать!
+                            print("[Защита] ХП стабильно в течение 3 сек. Моб наш! Принимаем бой...")
+                            current_hp = self.tracker.get_current_hp()
+                    else:
+                        # Если F2 успешно переключил на другого моба — уходим на начало цикла анализировать его
+                        print("[Поиск] Успешно переключились на другую цель через F2.")
+                        continue
+
+                # Шаг 3: Проверка на босса (череп)
+                # Если это босс, мы не ждем 3 секунды, а агрессивно жмем F2 дальше
+                is_boss = await self.validator.is_boss_selected()
+                if is_boss:
+                    if self.is_paused: continue
+                    print("[Защита] ВНИМАНИЕ! ОБНАРУЖЕН БОСС (ЧЕРЕП)! Ищем следующего через F2...")
+                    await self.arduino.send_button("F2") 
+                    await asyncio.sleep(self.search_delay)
+                    continue
+
+                # Шаг 4: Цель окончательно одобрена. Инициация атаки
+                if self.is_paused: continue
+                print("[Бой] Цель одобрена! Начинаем атаку слугой...")
+                await self.arduino.send_button("1") 
+                await asyncio.sleep(self.pet_tank_delay)
+                
+                if self.is_paused: continue
+                print("[Бой] Начинаем атаку персонажем...")
+                await self.arduino.send_button("F4")   
+                
+                # Таймеры контроля боя
+                start_combat_time = asyncio.get_event_loop().time()
+                last_attack_time = start_combat_time
+                max_seen_hp = current_hp
+                
+                # Внутренний цикл сражения с мобом
+                while True:
+                    await asyncio.sleep(0.05)
+                    
+                    if self.is_paused:
+                        await asyncio.sleep(0.2)
+                        continue
+                    
+                    current_hp = self.tracker.get_current_hp()
+                    now = asyncio.get_event_loop().time()
+                    
+                    # Условие А: Моб успешно повержен (0% ХП)
+                    if current_hp == 0:
+                        if self.is_paused: break
+                        print("[Бой] Моб повержен! МГНОВЕННЫЙ сбор лута...")
+                        loot_clicks = random.randint(3, 5)
+                        for _ in range(loot_clicks):
+                            if self.is_paused: break
+                            await self.arduino.send_button("F1")
+                            await asyncio.sleep(self.loot_delay) 
+                        print("[Бой] Сбор завершен. Переходим к следующему мобу.")
+                        break
+                    
+                    # Условие Б: Защита от застревания (Таймаут)
+                    if now - start_combat_time >= self.combat_timeout:
+                        if self.is_paused: break
+                        print("[Таймаут] Застряли или нет урона. Сброс цели через Esc...")
+                        await self.arduino.send_button("Esc")
+                        await asyncio.sleep(self.loot_delay)
+                        break
+                    
+                    # Если урон идет, сдвигаем таймер атаки вперед (не спамим кнопки)
+                    if current_hp < max_seen_hp:
+                        max_seen_hp = current_hp
+                        last_attack_time = now  
+                    
+                    # Условие В: Урон застопорился. Повторная атака
+                    if now - last_attack_time >= random.uniform(1.0, 4.0):
+                        if self.is_paused: continue
+                        print("[Бой] ХП моба не падает. Повторное прожатие атаки...")
+                        await self.arduino.send_button("1")
+                        last_attack_time = now
+
+            except Exception as e:
+                print(f"[Критическая ошибка] Ошибка в боевом цикле сумонера: {e}")
+                await asyncio.sleep(1.0)
+
+
+
+================================================================================
+ FILE: vision\target_validator.py (132 lines)
+================================================================================
+
+import cv2
+import json
+import os
+import numpy as np
+import asyncio
+from vision.screen_capture import ScreenCapturer
+
+try:
+    from ctypes import windll
+    windll.user32.SetProcessDPIAware()
+except Exception as e:
+    print("DPI Awareness предупреждение:", e)
+
+class TargetValidator:
+    def __init__(self, profile_name="PK_den4ika", skull_template_name="skull.png", threshold=0.75):
+        self.profile_name = profile_name
+        self.threshold = threshold
+        
+        vision_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config_path = os.path.join(os.path.dirname(vision_dir), "config.json")
+        self.skull_path = os.path.join(vision_dir, skull_template_name)
+        
+        self.bbox = None  
+        self.capturer = ScreenCapturer()
+        self.skull_img = self._load_template()
+
+    def _load_template(self):
+        if os.path.exists(self.skull_path):
+            print("Шаблон черепа успешно загружен:", self.skull_path)
+            return cv2.imread(self.skull_path, cv2.IMREAD_GRAYSCALE)
+        else:
+            print("Внимание! Иконка босса не найдена по пути:", self.skull_path)
+            return None
+
+    def load_profile(self) -> bool:
+        if not os.path.exists(self.config_path):
+            return False
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            bbox = config.get("target_zones", {}).get(self.profile_name)
+            if bbox:
+                self.bbox = tuple(bbox)
+                print("Координаты зоны цели загружены:", self.bbox)
+                return True
+            return False
+        except Exception as e:
+            print("Ошибка при чтении профиля цели:", e)
+            return False
+
+    def _save_profile(self):
+        config = {}
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        if "target_zones" not in config:
+            config["target_zones"] = {}
+        config["target_zones"][self.profile_name] = list(self.bbox)
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+
+    def calibrate_target_zone(self):
+        import tkinter as tk
+        from PIL import ImageTk
+        
+        print("Делаем снимок экрана для калибровки...")
+        import time
+        time.sleep(1)
+        screenshot = self.capturer.take_screenshot()
+        
+        root = tk.Tk()
+        root.attributes("-fullscreen", True)
+        root.attributes("-topmost", True)
+        canvas = tk.Canvas(root, cursor="cross", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+        tk_img = ImageTk.PhotoImage(screenshot)
+        canvas.create_image(0, 0, anchor="nw", image=tk_img)
+        
+        start_x, start_y = 0, 0
+        rect_id = None
+        
+        def on_press(event):
+            nonlocal start_x, start_y, rect_id
+            start_x, start_y = event.x, event.y
+            if rect_id: canvas.delete(rect_id)
+        def on_drag(event):
+            nonlocal rect_id
+            if rect_id: canvas.delete(rect_id)
+            rect_id = canvas.create_rectangle(start_x, start_y, event.x, event.y, outline="yellow", width=2)
+        def on_release(event):
+            x = min(start_x, event.x)
+            y = min(start_y, event.y)
+            w = abs(event.x - start_x)
+            h = abs(event.y - start_y)
+            self.bbox = (x, y, w, h)
+            root.destroy()
+
+        canvas.bind("<ButtonPress-1>", on_press)
+        canvas.bind("<B1-Motion>", on_drag)
+        canvas.bind("<ButtonRelease-1>", on_release)
+        root.mainloop()
+        
+        if self.bbox and self.bbox[2] > 5 and self.bbox[3] > 5:
+            self._save_profile()
+        else:
+            raise ValueError("Область цели не была выделена корректно!")
+
+    def _sync_match_template(self, screenshot):
+        frame_gray = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+        x, y, w, h = self.bbox
+        roi = frame_gray[y:y+h, x:x+w]
+        
+        if roi.shape[0] < self.skull_img.shape[0] or roi.shape[1] < self.skull_img.shape[1]:
+            return False
+
+        result = cv2.matchTemplate(roi, self.skull_img, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+        
+        return max_val >= self.threshold
+
+    async def is_boss_selected(self) -> bool:
+        if self.skull_img is None or not self.bbox:
+            return False
+
+        loop = asyncio.get_event_loop()
+        screenshot = await loop.run_in_executor(None, self.capturer.take_screenshot)
+        is_boss = await loop.run_in_executor(None, self._sync_match_template, screenshot)
+        
+        return is_boss
+
+
+
+================================================================================
+ FILE: vision\test_boss.py (37 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+
+# Добавляем корень проекта в пути, чтобы Python корректно импортировал ScreenCapturer
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vision.target_validator import TargetValidator
+
+async def main():
+    # Создаем валидатор босса (порог совпадения 0.75)
+    validator = TargetValidator(profile_name="PK_den4ika", threshold=0.75)
+    
+    # Загружаем профиль из config.json. Если его нет — запускаем калибровку рамки
+    if not validator.load_profile():
+        print("Зона цели не настроена. Запуск ручной калибровки...")
+        validator.calibrate_target_zone()
+        
+    print("\nСтарт асинхронной проверки босса. Каждую секунду проверяем область...")
+    print("В корне проекта обновляется файл 'debug_boss.png' для проверки рамки.")
+    
+    try:
+        while True:
+            # Вызываем асинхронный метод через AWAIT! Текущий поток не блокируется.
+            if await validator.is_boss_selected():
+                print("[!] ОБНАРУЖЕН БОСС! В рамке найден череп.")
+            else:
+                print("[ОК] Обычный моб. Череп не найден.")
+                
+            # Проверка раз в секунду
+            await asyncio.sleep(1.0)
+            
+    except KeyboardInterrupt:
+        print("\nТестирование завершено.")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
+ FILE: vision\test_combat.py (112 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+import keyboard  # Импортируем библиотеку для глобальных горячих клавиш
+
+# Добавляем корень проекта в пути импорта
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vision.hp_tracker import HPTracker
+from vision.target_validator import TargetValidator
+from vision.summoner_combat import SummonerCombat
+from arduino.arduino_controller_async import AsyncArduinoController
+
+class BotManager:
+    def __init__(self, profile_name="PK_den4ika"):
+        self.profile_name = profile_name
+        
+        # Инициализация всех подсистем проекта в одном месте
+        self.arduino = AsyncArduinoController()
+        self.tracker = HPTracker(profile_name=self.profile_name)
+        self.validator = TargetValidator(profile_name=self.profile_name)
+        self.bot_combat = SummonerCombat(self.tracker, self.validator, self.arduino)
+        
+        # Задачи asyncio для управления потоками
+        self.tracker_task = None
+        self.combat_task = None
+        self.loop = None
+
+    async def initialize_all(self) -> bool:
+        """Пошаговый запуск и калибровка всех подсистем."""
+        print("=== ИНИЦИАЛИЗАЦИЯ СИСТЕМ УПРАВЛЕНИЯ БОТОМ ===")
+        
+        # 1. Подключение к Arduino
+        if not await self.arduino.connect():
+            print("[Ошибка] Нет связи с Arduino Leonardo. Выход.")
+            return False
+
+        # 2. Настройка зрения ХП
+        if not self.tracker.load_profile():
+            print("[Калибровка] Профиль ХП не найден. Запуск калибровки полосы...")
+            self.tracker.calibrate()
+
+        # 3. Настройка валидатора Босса
+        if not self.validator.load_profile():
+            print("[Калибровка] Профиль зоны босса не найден. Запуск калибровки рамки...")
+            self.validator.calibrate_target_zone()
+
+        return True
+
+    def toggle_pause(self):
+        """Метод переключения состояния паузы (вызывается из хука клавиатуры)."""
+        # Переключаем флаг паузы в боевом классе
+        self.bot_combat.is_paused = not self.bot_combat.is_paused
+        
+        if self.bot_combat.is_paused:
+            print("\n" + "="*40)
+            print("[ПАУЗА] Бот временно остановлен клавишей 'P'.")
+            print("="*40 + "\n")
+        else:
+            print("\n" + "="*40)
+            print("[РАБОТА] Бот возобновил фарм клавишей 'P'.")
+            print("="*40 + "\n")
+
+    def setup_hotkeys(self):
+        """Регистрация глобального хука на клавишу 'P'."""
+        self.loop = asyncio.get_running_loop()
+        
+        # keyboard работает в отдельном потоке ОС Windows.
+        # Чтобы безопасно изменить состояние флага в asyncio, используем call_soon_threadsafe
+        keyboard.add_hotkey('p', lambda: self.loop.call_soon_threadsafe(self.toggle_pause))
+        print("[Система] Глобальная горячая клавиша 'P' (Пауза/Старт) успешно зарегистрирована.")
+
+    async def run(self):
+        """Запуск параллельного выполнения задач."""
+        if not await self.initialize_all():
+            return
+
+        # Настраиваем перехват клавиш
+        self.setup_hotkeys()
+        
+        print("\n[Успешно] Все системы запущены. Начнем охоту через 2 секунды!")
+        print("-> Нажмите английскую букву 'P' в любой момент для паузы или продолжения.\n")
+        await asyncio.sleep(2)
+        
+        # Создаем параллельные асинхронные задачи
+        self.tracker_task = asyncio.create_task(self.tracker.track_loop())
+        self.combat_task = asyncio.create_task(self.bot_combat.start_loop())
+        
+        # Удерживаем задачи активными
+        await asyncio.gather(self.tracker_task, self.combat_task)
+
+    def shutdown(self):
+        """Корректное закрытие всех соединений при выходе."""
+        print("\n[Выход] Остановка всех подсистем менеджера...")
+        if self.tracker_task: self.tracker_task.cancel()
+        if self.combat_task: self.combat_task.cancel()
+        keyboard.remove_all_hotkeys()
+        self.arduino.close()
+        print("[Готово] Бот полностью отключен.")
+
+async def main():
+    # Создаем единый менеджер управления
+    manager = BotManager(profile_name="PK_den4ika")
+    try:
+        await manager.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        manager.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
+ FILE: vision\test_vision.py (29 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+
+# Добавляем корень проекта в системный путь, чтобы питон видел модули правильно
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vision.hp_tracker import HPTracker
+
+async def main():
+    # Создаем объект трекера. Интервал проверки ставим 1.0 для тестов
+    tracker = HPTracker(profile_name="PK_den4ika", check_interval=1.0)
+    
+    # Пытаемся загрузить профиль. Если его нет — запускаем калибровку.
+    # Если хотите перекалибровать заново — временно раскомментируйте строку ниже:
+    # tracker.calibrate()
+    
+    if not tracker.load_profile():
+        print("Профиль не найден в конфиге. Запуск ручной калибровки...")
+        tracker.calibrate()
+        
+    # Переходим к постоянному мониторингу
+    await tracker.track_loop()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nТестирование завершено пользователем.")
+
+

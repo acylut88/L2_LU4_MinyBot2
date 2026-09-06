@@ -1,0 +1,35 @@
+{
+    "connection": {
+        "port": "COM4",
+        "baudrate": 115200,
+        "dtr": true,
+        "rts": true
+    },
+    "buttons": {
+        "F1": "A", "F2": "B", "F3": "C", "F4": "D", "F5": "E",
+        "F6": "F", "F7": "G", "F8": "H", "F9": "I", "F10": "J", "F11": "K",
+        "1": "c", "2": "d", "3": "e", "4": "f", "5": "g",
+        "6": "h", "7": "i", "8": "j", "9": "k", "0": "l",
+        "-": "m", "=": "n",
+        "Num1": "o", "Num2": "p", "Num3": "q", "Num4": "r", "Num5": "s",
+        "Num6": "t", "Num7": "u", "Num8": "v", "Num9": "w", "Num0": "x",
+        "Num/": "y", "Num*": "z",
+        "P": "P",
+        "Esc": "X",
+        "LeftClick": "L",
+        "RightClick": "R"
+    },
+    "game_windows": {
+        "Main_Window": "UnReviver",
+        "Second_Window": "Acylut"
+    },
+    "profiles": {
+        "PK_den4ika": {
+            "start_point": [1375, 124],
+            "end_point": [1745, 124]
+        }
+    },
+    "target_zones": {
+        "PK_den4ika": [1281, 9, 125, 127]
+    }
+}
