@@ -107,13 +107,24 @@ class HPTracker:
         print(f"Старт скоростного мониторинга для [{self.profile_name}] БЕЗ дебаг-файлов.")
         last_log_time = 0.0
         
+        # Список строго валидных шаблонов ХП-бара (от 0% до 100%)
+        valid_templates = [
+            [False, False, False, False, False], # 0%
+            [True,  False, False, False, False], # 20%
+            [True,  True,  False, False, False], # 40%
+            [True,  True,  True,  False, False], # 60%
+            [True,  True,  True,  True,  False], # 80%
+            [True,  True,  True,  True,  True]   # 100%
+        ]
+        
         try:
             while True:
                 screenshot = self.capturer.take_screenshot()
                 frame_rgb = np.array(screenshot)
                 h, w, _ = frame_rgb.shape
                 
-                status_changed = False
+                # Временный массив для обсчета текущего кадра
+                temp_status = [True] * 5
                 
                 for i, (x, y) in enumerate(self.points):
                     if y >= h or x >= w:
@@ -125,26 +136,37 @@ class HPTracker:
                     
                     changed = self.is_color_changed(curr_color, base_color)
                     
+                    # Если цвет ушел — точки тут нет
                     if changed:
-                        self.change_counters[i] += 1
-                        if self.change_counters[i] >= self.consecutive_triggers:
-                            if self.points_status[i]:
-                                self.points_status[i] = False
-                                status_changed = True
-                    else:
-                        self.change_counters[i] = 0
-                        if not self.points_status[i]:
-                            self.points_status[i] = True
-                            status_changed = True
-                            
-                curr_time = asyncio.get_event_loop().time()
+                        temp_status[i] = False
                 
-                if status_changed or (curr_time - last_log_time >= 1.0):
-                    hp = self.get_current_hp()
-                    visual_status = ["+" if s else "-" for s in self.points_status]
-                    print(f"[{self.profile_name} HP] Здоровье: {hp}% | Точки: {visual_status}")
-                    last_log_time = curr_time
+                # === КРИТИЧЕСКАЯ ФИЧА: ВАЛИДАЦИЯ МАТРИЦЫ ХП ===
+                # Если получившийся массив точек совпадает с одним из правильных шаблонов
+                if temp_status in valid_templates:
+                    status_changed = False
+                    
+                    # Применяем фильтр consecutive_triggers для каждой точки
+                    for i in range(5):
+                        if temp_status[i] != self.points_status[i]:
+                            self.change_counters[i] += 1
+                            if self.change_counters[i] >= self.consecutive_triggers:
+                                self.points_status[i] = temp_status[i]
+                                status_changed = True
+                        else:
+                            self.change_counters[i] = 0
+                            
+                    curr_time = asyncio.get_event_loop().time()
+                    if status_changed or (curr_time - last_log_time >= 1.0):
+                        hp = self.get_current_hp()
+                        visual_status = ["+" if s else "-" for s in self.points_status]
+                        print(f"[{self.profile_name} HP] Здоровье: {hp}% | Точки: {visual_status}")
+                        last_log_time = curr_time
+                else:
+                    # Если прилетел рваный мусор вроде ['-', '-', '+', '-', '-']
+                    # Мы просто ИГНОРИРУЕМ этот кадр и не обновляем self.points_status
+                    pass
                     
                 await asyncio.sleep(self.check_interval)
         except asyncio.CancelledError:
             print("Мониторинг ХП остановлен.")
+

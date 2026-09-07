@@ -29,18 +29,21 @@ class BotManager:
         self.hwnd_main = None
         self.hwnd_second = None
         
-        # Инициализация всех подсистем
+        # Инициализация ядра
         self.arduino = AsyncArduinoController()
-        self.tracker = HPTracker(profile_name=self.profile_name)
-        self.validator = TargetValidator(profile_name=self.profile_name, threshold=0.68)
-        self.bot_combat = SummonerCombat(self.tracker, self.validator, self.arduino)
         
-        # Интегрируем систему баффов
+        # Зрение и бой моба
+        self.tracker = HPTracker(profile_name=self.profile_name)
+        self.validator = TargetValidator(profile_name=self.profile_name)
+        
+        # Системы поддержки и кача
         self.buff_system = BuffSystem(self.arduino)
+        
+        # Передаем только то, что реально работает: трекер, валидатор, ардуино и баффы
+        self.bot_combat = SummonerCombat(self.tracker, self.validator, self.arduino, self.buff_system)
         
         self.tracker_task = None
         self.combat_task = None
-        self.loop = None
 
     def _load_window_nicks(self):
         try:

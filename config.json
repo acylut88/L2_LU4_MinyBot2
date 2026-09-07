@@ -34,8 +34,8 @@
     },
     "profiles": {
         "PK_den4ika": {
-            "start_point": [1375, 124],
-            "end_point": [1745, 124]
+            "start_point": [1360, 125],
+            "end_point": [1750, 125]
         }
     },
     "target_zones": {

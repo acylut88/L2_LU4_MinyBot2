@@ -1,5 +1,33 @@
 
 ================================================================================
+ FILE: main.py (21 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+
+# Корректный импорт модулей из структуры проекта
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from vision.bot_manager import BotManager
+
+async def main():
+    # Создаем единый менеджер управления под нужный профиль
+    manager = BotManager(profile_name="PK_den4ika")
+    try:
+        await manager.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        manager.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
  FILE: arduino\arduino_controller_async.py (109 lines)
 ================================================================================
 
@@ -112,6 +140,290 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+================================================================================
+ FILE: vision\bot_manager.py (167 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+import json
+import keyboard
+import win32gui
+import win32con
+
+try:
+    from ctypes import windll
+    windll.user32.SetProcessDPIAware()
+except Exception as e:
+    print("DPI Awareness предупреждение:", e)
+
+from vision.hp_tracker import HPTracker
+from vision.target_validator import TargetValidator
+from vision.summoner_combat import SummonerCombat
+from vision.buff_system import BuffSystem  # Импортируем нашу систему баффов
+from arduino.arduino_controller_async import AsyncArduinoController
+
+class BotManager:
+    def __init__(self, profile_name="PK_den4ika"):
+        self.profile_name = profile_name
+        
+        vision_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config_path = os.path.join(os.path.dirname(vision_dir), "config.json")
+        
+        self.main_nick, self.second_nick = self._load_window_nicks()
+        self.hwnd_main = None
+        self.hwnd_second = None
+        
+        # Инициализация ядра
+        self.arduino = AsyncArduinoController()
+        
+        # Зрение и бой моба
+        self.tracker = HPTracker(profile_name=self.profile_name)
+        self.validator = TargetValidator(profile_name=self.profile_name)
+        
+        # Системы поддержки и кача
+        self.buff_system = BuffSystem(self.arduino)
+        
+        # Передаем только то, что реально работает: трекер, валидатор, ардуино и баффы
+        self.bot_combat = SummonerCombat(self.tracker, self.validator, self.arduino, self.buff_system)
+        
+        self.tracker_task = None
+        self.combat_task = None
+
+    def _load_window_nicks(self):
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            w_settings = config.get("game_windows", {})
+            return w_settings.get("Main_Window", "UnReviver"), w_settings.get("Second_Window", "Acylut")
+        except Exception:
+            return "UnReviver", "Acylut"
+
+    def _find_game_windows(self) -> bool:
+        title_main = f"LU4 - {self.main_nick}"
+        title_second = f"LU4 - {self.second_nick}"
+        
+        self.hwnd_main = win32gui.FindWindow(None, title_main)
+        self.hwnd_second = win32gui.FindWindow(None, title_second)
+        
+        if not self.hwnd_main:
+            print(f"[Окна] Предупреждение: Основное окно '{title_main}' не найдено.")
+        else:
+            print(f"[Окна] Привязано основное окно (HWND: {self.hwnd_main})")
+            
+        if not self.hwnd_second:
+            print(f"[Окна] Предупреждение: Второе окно '{title_second}' не найдено.")
+        else:
+            print(f"[Окна] Привязано второе окно (HWND: {self.hwnd_second})")
+            
+        return bool(self.hwnd_main or self.hwnd_second)
+
+    async def activate_window(self, target="main"):
+        hwnd = self.hwnd_main if target == "main" else self.hwnd_second
+        nick = self.main_nick if target == "main" else self.second_nick
+        
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            print(f"[Окна] Ошибка: Окно {nick} недоступно.")
+            return False
+            
+        if win32gui.GetForegroundWindow() == hwnd:
+            return True
+            
+        print(f"[Окна] Активация окна персонажа: {nick}...")
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(hwnd)
+        
+        await asyncio.sleep(0.2)
+        return True
+
+    async def initialize_all(self) -> bool:
+        print("=== ИНИЦИАЛИЗАЦИЯ СИСТЕМ УПРАВЛЕНИЯ БОТОМ ===")
+        
+        self._find_game_windows()
+        
+        if not await self.arduino.connect():
+            print("[Ошибка] Нет связи с Arduino. Выход.")
+            return False
+
+        await self.activate_window("main")
+
+        if not self.tracker.load_profile():
+            print("[Калибровка] Настройка ХП моба...")
+            self.tracker.calibrate()
+
+        if not self.validator.load_profile():
+            print("[Калибровка] Настройка рамки босса...")
+            self.validator.calibrate_target_zone()
+
+        return True
+
+    def toggle_pause(self):
+        """Переключатель глобальной паузы для всех подсистем."""
+        self.bot_combat.is_paused = not self.bot_combat.is_paused
+        self.tracker.is_paused = self.bot_combat.is_paused
+        
+        # Передаем состояние паузы в систему баффов
+        self.buff_system.is_paused = self.bot_combat.is_paused
+        
+        if self.bot_combat.is_paused:
+            print(f"\n{'='*40}\n[ПАУЗА] Бот остановлен клавишей 'P'. Логи и баффы заморожены.\n{'='*40}\n")
+        else:
+            print(f"\n{'='*40}\n[РАБОТА] Бот возобновил фарм клавишей 'P'.\n{'='*40}\n")
+
+    def setup_hotkeys(self):
+        self.loop = asyncio.get_running_loop()
+        keyboard.add_hotkey('p', lambda: self.loop.call_soon_threadsafe(self.toggle_pause))
+        print("[Система] Глобальная горячая клавиша 'P' (Пауза/Старт) зарегистрирована.")
+
+    async def run(self):
+        if not await self.initialize_all():
+            return
+
+        self.setup_hotkeys()
+        
+        print("\n[Успешно] Все подсистемы запущены.")
+        print("-> Автоматическое переключение на окно сумонера через 2 сек...\n")
+        await asyncio.sleep(2)
+        
+        await self.activate_window("main")
+        
+        # 1. Запускаем стартовый фулл-бафф (прожмет Num1-Num9)
+        await self.buff_system.buff_all_at_start()
+        
+        # 2. Включаем циклические независимые таймеры ребаффа
+        self.buff_system.start_buff_timers()
+        
+        # 3. Запускаем параллельные задачи кача и зрения
+        self.tracker_task = asyncio.create_task(self.tracker.track_loop())
+        self.combat_task = asyncio.create_task(self.bot_combat.start_loop())
+        
+        await asyncio.gather(self.tracker_task, self.combat_task)
+
+    def shutdown(self):
+        print("\n[Выход] Закрытие ресурсов менеджера...")
+        if self.tracker_task: self.tracker_task.cancel()
+        if self.combat_task: self.combat_task.cancel()
+        
+        # Выключаем таймеры баффов при выходе
+        self.buff_system.stop_buff_timers()
+        
+        keyboard.remove_all_hotkeys()
+        self.arduino.close()
+        print("[Готово] Бот полностью отключен.")
+
+
+
+================================================================================
+ FILE: vision\buff_system.py (103 lines)
+================================================================================
+
+import asyncio
+from arduino.arduino_controller_async import AsyncArduinoController
+
+class BuffSystem:
+    def __init__(self, arduino: AsyncArduinoController):
+        """
+        Класс управления автоматическим ребаффом для Овера/Варка (Основное окно).
+        Синхронизирован с боевым циклом.
+        """
+        self.arduino = arduino
+        self.is_paused = False
+        self.buff_tasks = []
+        
+        # Очередь баффов, ожидающих безопасного момента для прожима
+        self.pending_buffs = {i: False for i in range(5)}
+        
+        # Конфигурация групп баффов и их таймингов (в секундах)
+        self.buff_schedule = [
+            {"keys": ["Num1", "Num2"], "interval": 900},
+            {"keys": ["Num3", "Num4"], "interval": 950},
+            {"keys": ["Num5", "Num6"], "interval": 1000},
+            {"keys": ["Num7", "Num8"], "interval": 1050},
+            {"keys": ["Num9"],          "interval": 1100}
+        ]
+
+    async def _send_button_with_delay(self, button_name: str):
+        """Прожимает кнопку баффа и жестко ждет 2 секунды окончания анимации каста."""
+        print(f"[Баффер] Кастую бафф: {button_name}...")
+        await self.arduino.send_button(button_name)
+        await asyncio.sleep(2.0)  # Таймаут 2 секунды для каста
+
+    async def buff_all_at_start(self):
+        """Фулл-бафф при старте бота (Num1 - Num9 по очереди)."""
+        print("\n[Баффер] Запуск первичного фулл-баффа на старте...")
+        all_keys = ["Num1", "Num2", "Num3", "Num4", "Num5", "Num6", "Num7", "Num8", "Num9"]
+        for key in all_keys:
+            while self.is_paused:
+                await asyncio.sleep(0.5)
+            await self._send_button_with_delay(key)
+        print("[Баффер] Первичный фулл-бафф успешно завершён.\n")
+
+    async def _buff_timer_worker(self, index: int, interval: float):
+        """Фоновый воркер, который просто фиксирует, что время баффа вышло."""
+        await asyncio.sleep(interval)
+        
+        while True:
+            try:
+                # Если время пришло — выставляем флаг «бафф ожидает прожима»
+                self.pending_buffs[index] = True
+                
+                # Ждем, пока боевой цикл заберет и сбросит этот флаг в False
+                while self.pending_buffs[index]:
+                    await asyncio.sleep(1.0)
+                    
+                # Как только бафф успешно лег, запускаем таймер на следующий круг
+                await asyncio.sleep(interval)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[Ошибка Баффера] Сбой таймера группы {index}: {e}")
+                await asyncio.sleep(5.0)
+
+    async def check_and_run_pending_buffs(self) -> bool:
+        """
+        Вызывается боевым циклом между убийствами мобов. 
+        Если есть накопившиеся баффы — прожимает их, блокируя поиск мобов.
+        """
+        if self.is_paused:
+            return False
+            
+        buffed_any = False
+        
+        # Проверяем все 5 групп по очереди
+        for i, group in enumerate(self.buff_schedule):
+            if self.pending_buffs[i]:
+                print(f"\n[Баффер] Безопасный момент! Начинаю ребафф группы {i+1}: {group['keys']}")
+                buffed_any = True
+                
+                # Поочередно прожимаем кнопки баффа из этой группы
+                for key in group["keys"]:
+                    if self.is_paused:
+                        break
+                    await self._send_button_with_delay(key)
+                    
+                # Сбрасываем флаг ожидания, воркер запустит таймер заново
+                self.pending_buffs[i] = False
+                print(f"[Баффер] Ребафф группы {i+1} завершен.\n")
+                
+        return buffed_any
+
+    def start_buff_timers(self):
+        print("[Баффер] Активация независимых таймеров ребаффа...")
+        self.buff_tasks = []
+        for i, group in enumerate(self.buff_schedule):
+            task = asyncio.create_task(self._buff_timer_worker(i, group["interval"]))
+            self.buff_tasks.append(task)
+
+    def stop_buff_timers(self):
+        print("[Баффер] Остановка таймеров баффов...")
+        for task in self.buff_tasks:
+            task.cancel()
+        self.buff_tasks.clear()
 
 
 
@@ -360,25 +672,27 @@ class ScreenCapturer:
 
 
 ================================================================================
- FILE: vision\summoner_combat.py (179 lines)
+ FILE: vision\summoner_combat.py (175 lines)
 ================================================================================
 
 import asyncio
 import random
 from vision.hp_tracker import HPTracker
 from vision.target_validator import TargetValidator
+from vision.target_puller import TargetPuller
 from arduino.arduino_controller_async import AsyncArduinoController
 
 class SummonerCombat:
-    def __init__(self, tracker: HPTracker, validator: TargetValidator, arduino: AsyncArduinoController):
+    def __init__(self, tracker: HPTracker, validator: TargetValidator, arduino: AsyncArduinoController, buff_system=None):
         """
-        Класс управления боевой логикой сумонера с тактикой удержания спота.
+        Класс управления боевой логикой сумонера.
         """
         self.tracker = tracker
         self.validator = validator
         self.arduino = arduino
+        self.buff_system = buff_system  
         
-        # Флаг паузы, которым будет управлять BotManager
+        self.puller = TargetPuller(self.tracker, self.arduino)
         self.is_paused = False
         
         # Конфигурация боевых таймингов
@@ -388,6 +702,8 @@ class SummonerCombat:
         self.escape_delay = 0.1          
         self.loot_delay = 0.05           
         self.pet_tank_delay = 0.5        
+
+        self.f2_fail_count = 0
 
     async def start_loop(self):
         print("\n[Бой] Класс Суммонер успешно запущен. Входим в боевой цикл...")
@@ -404,42 +720,49 @@ class SummonerCombat:
                 
                 if current_hp == 0:
                     if self.is_paused: continue
+                    
+                    # === ЗАЩИЩЕННЫЙ РЕБАФФ МЕЖДУ МОБАМИ ===
+                    # Проверяем, что объект buff_system существует и у него точно есть нужный метод
+                    if self.buff_system and hasattr(self.buff_system, 'check_and_run_pending_buffs'):
+                        await self.buff_system.check_and_run_pending_buffs()
+                    # ======================================
+
+                    if self.is_paused: continue
+                    
+                    # ПРОВЕРКА КОНТР-ФИЧИ ДАЛЬНЕГО ПУЛЛЕРА (5 фейлов F2)
+                    if self.f2_fail_count >= 5 or await self.puller.execute_pulling(self.validator, init_attack_keys=["1", "F4"]):
+                        self.f2_fail_count = 0 
+                        continue
+                    
+                    # ШТАТНЫЙ РЕЖИМ ПОИСКА ПО F2
                     print("[Поиск] Цели нет. МГНОВЕННЫЙ поиск моба (Нажимаем F2)...")
                     await self.arduino.send_button("F2")
                     await asyncio.sleep(self.search_delay)
                     
                     current_hp = self.tracker.get_current_hp()
                     if current_hp == 0:
+                        self.puller.register_f2_fail()
                         await asyncio.sleep(self.empty_spot_delay)
                         continue
+
+                self.puller.reset_f2_fails()
 
                 # Шаг 2: Анализ состояния найденной цели
                 print(f"[Таргет] Обнаружена цель. Текущее ХП моба: {current_hp}%")
                 
-                # ЕСЛИ МОБ РАНЕНЫЙ (<100% ХП)
+                # Логика проверки раненых мобов (3 секунды ожидания)
                 if current_hp < 100:
-                    if self.is_paused: continue
-                    print("[Защита] Моб ранен (<100% ХП). Пробуем найти другого (Нажимаем F2)...")
-                    
-                    # Запоминаем текущее ХП раненого моба перед попыткой переключения
+                    print("[Защита] Моб ранен (<100% ХП). Пробуем найти другого через F2...")
                     last_damaged_hp = current_hp
-                    
-                    # Прожимаем нексттаргет поверх него, чтобы переключить цель
                     await self.arduino.send_button("F2")
                     await asyncio.sleep(self.search_delay)
                     
-                    # Проверяем, изменился ли таргет после нажатия F2
                     new_hp = self.tracker.get_current_hp()
-                    
-                    # Если таргет остался на том же раненом мобе или спот пуст (новое ХП равно 0 или старому раненому значению)
                     if new_hp == 0 or new_hp == last_damaged_hp:
-                        print("[Защита] Следующий моб не найден. Включаем режим ожидания (3 сек)...")
-                        
-                        # Запускаем 3-секундный таймер слежения за ХП раненого моба
+                        print("[Защита] Следующий моб не найден. Режим ожидания (3 сек)...")
                         start_wait = asyncio.get_event_loop().time()
                         is_someone_attacking = False
                         
-                        # Возвращаем таргет на этого моба, если он сбросился в 0
                         if new_hp == 0:
                             await self.arduino.send_button("F2")
                             await asyncio.sleep(self.search_delay)
@@ -447,92 +770,77 @@ class SummonerCombat:
                         while asyncio.get_event_loop().time() - start_wait < 3.0:
                             await asyncio.sleep(0.2)
                             if self.is_paused: break
-                            
                             check_hp = self.tracker.get_current_hp()
-                            # Если за эти 3 секунды ХП моба уменьшилось — значит, его точно КТО-ТО БЬЕТ
                             if check_hp < last_damaged_hp and check_hp > 0:
-                                print(f"[Защита] ХП моба падает ({check_hp}% < {last_damaged_hp}%)! Его бьют. Пропускаем спот...")
+                                print("[Защита] ХП моба падает! Его бьют. Пропускаем...")
                                 is_someone_attacking = True
                                 break
-                            
-                        if self.is_paused: continue
-                        
+                                
                         if is_someone_attacking:
-                            # Если моба бьют, сбрасываем его через Esc и уходим спать на пустой спот
                             await self.arduino.send_button("Esc")
                             await asyncio.sleep(self.empty_spot_delay)
                             continue
                         else:
-                            # Если за 3 секунды ХП не упало — моб наш (агр или реген). Идем атаковать!
-                            print("[Защита] ХП стабильно в течение 3 сек. Моб наш! Принимаем бой...")
+                            print("[Защита] ХП стабильно 3 сек. Принимаем бой...")
                             current_hp = self.tracker.get_current_hp()
                     else:
-                        # Если F2 успешно переключил на другого моба — уходим на начало цикла анализировать его
-                        print("[Поиск] Успешно переключились на другую цель через F2.")
                         continue
 
-                # Шаг 3: Проверка на босса (череп)
-                # Если это босс, мы не ждем 3 секунды, а агрессивно жмем F2 дальше
+                # Шаг 3: Проверка на босса (череп) для обычного режима
                 is_boss = await self.validator.is_boss_selected()
                 if is_boss:
-                    if self.is_paused: continue
-                    print("[Защита] ВНИМАНИЕ! ОБНАРУЖЕН БОСС (ЧЕРЕП)! Ищем следующего через F2...")
-                    await self.arduino.send_button("F2") 
-                    await asyncio.sleep(self.search_delay)
+                    print("[Защита] ВНИМАНИЕ! ОБНАРУЖЕН БОСС (ЧЕРЕП)! Сбрасываем таргет...")
+                    await self.arduino.send_button("Esc") 
+                    await asyncio.sleep(self.escape_delay)
                     continue
 
-                # Шаг 4: Цель окончательно одобрена. Инициация атаки
-                if self.is_paused: continue
+                # Шаг 4: ШТАТНАЯ АТАКА
                 print("[Бой] Цель одобрена! Начинаем атаку слугой...")
                 await self.arduino.send_button("1") 
                 await asyncio.sleep(self.pet_tank_delay)
-                
-                if self.is_paused: continue
                 print("[Бой] Начинаем атаку персонажем...")
                 await self.arduino.send_button("F4")   
                 
-                # Таймеры контроля боя
                 start_combat_time = asyncio.get_event_loop().time()
                 last_attack_time = start_combat_time
                 max_seen_hp = current_hp
                 
-                # Внутренний цикл сражения с мобом
+                # Внутренний цикл обычного сражения
                 while True:
                     await asyncio.sleep(0.05)
-                    
                     if self.is_paused:
                         await asyncio.sleep(0.2)
                         continue
-                    
+                        
                     current_hp = self.tracker.get_current_hp()
                     now = asyncio.get_event_loop().time()
                     
-                    # Условие А: Моб успешно повержен (0% ХП)
+                    # === ЖЕСТКАЯ БЛОКИРОВКА: СБОР ЛУТА ДО ВЫХОДА ИЗ ЦИКЛА ===
                     if current_hp == 0:
-                        if self.is_paused: break
                         print("[Бой] Моб повержен! МГНОВЕННЫЙ сбор лута...")
+                        
+                        # Бот нажимает F1 строго внутри боевой фазы. 
+                        # Никакие внешние команды (F2, 0, Баффы) не пройдут, пока этот блок не завершится!
                         loot_clicks = random.randint(3, 5)
                         for _ in range(loot_clicks):
                             if self.is_paused: break
                             await self.arduino.send_button("F1")
                             await asyncio.sleep(self.loot_delay) 
-                        print("[Бой] Сбор завершен. Переходим к следующему мобу.")
-                        break
+                            
+                        print("[Бой] Сбор завершен. Освобождаем поток для следующей цели.")
+                        break # Только ТЕПЕРЬ выходим из цикла драки
+                    # =======================================================
                     
-                    # Условие Б: Защита от застревания (Таймаут)
                     if now - start_combat_time >= self.combat_timeout:
-                        if self.is_paused: break
-                        print("[Таймаут] Застряли или нет урона. Сброс цели через Esc...")
+                        print("[Таймаут] Застряли. Сброс цели...")
                         await self.arduino.send_button("Esc")
                         await asyncio.sleep(self.loot_delay)
                         break
                     
-                    # Если урон идет, сдвигаем таймер атаки вперед (не спамим кнопки)
                     if current_hp < max_seen_hp:
                         max_seen_hp = current_hp
                         last_attack_time = now  
                     
-                    # Условие В: Урон застопорился. Повторная атака
                     if now - last_attack_time >= random.uniform(1.0, 4.0):
                         if self.is_paused: continue
                         print("[Бой] ХП моба не падает. Повторное прожатие атаки...")
@@ -542,6 +850,102 @@ class SummonerCombat:
             except Exception as e:
                 print(f"[Критическая ошибка] Ошибка в боевом цикле сумонера: {e}")
                 await asyncio.sleep(1.0)
+
+
+
+================================================================================
+ FILE: vision\target_puller.py (89 lines)
+================================================================================
+
+import asyncio
+
+class TargetPuller:
+    def __init__(self, tracker, arduino, search_delay=0.07, empty_spot_delay=0.5):
+        """
+        Универсальный класс для вывода персонажа из затыка на пустом споте (Long-Range Pulling).
+        """
+        self.tracker = tracker
+        self.arduino = arduino
+        self.search_delay = search_delay
+        self.empty_spot_delay = empty_spot_delay
+        
+        # Счетчик неудачных поисков по F2 для вызова макроса "0"
+        self.f2_fail_count = 0
+
+    def reset_f2_fails(self):
+        """Сбрасывает счетчик фейлов (вызывать, когда обычный моб найден)."""
+        self.f2_fail_count = 0
+
+    def register_f2_fail(self):
+        """Регистрирует неудачный поиск по F2."""
+        self.f2_fail_count += 1
+
+    async def execute_pulling(self, validator, init_attack_keys: list) -> bool:
+        """
+        Линейная фича дальнего стягивания. Вызывается, если f2_fail_count >= 5.
+        """
+        if self.f2_fail_count < 5:
+            return False
+
+        print(f"[Puller] Накоплено {self.f2_fail_count} фейлов F2! Ищем дальнего моба по имени (Кнопка '0')...")
+        self.f2_fail_count = 0  # Сбрасываем счетчик фейлов
+        
+        await self.arduino.send_button("0")
+        
+        # МНОГОКРАТНАЯ ПРОВЕРКА: Ждем появления ХП-бара дальнего маяка (15 проверок по 100 мс)
+        current_hp = 0
+        for i in range(15):
+            await asyncio.sleep(0.1)
+            current_hp = self.tracker.get_current_hp()
+            if current_hp > 0:
+                print(f"[Puller] Дальний маяк успешно обнаружен на {i+1}-й проверке (ХП: {current_hp}%)!")
+                break
+        
+        # Шаг А: Если дальний моб по макросу "0" успешно нашелся
+        if current_hp > 0:
+            # Проверяем, не БОСС ли это
+            is_boss = await validator.is_boss_selected()
+            if is_boss:
+                print("[Puller] ВНИМАНИЕ! По макросу '0' найден БОСС! Сбрасываем таргет...")
+                await self.arduino.send_button("Esc")
+                await asyncio.sleep(0.1)
+                return False
+                
+            # Инициируем атаку, чтобы персонаж начал физически бежать к нему
+            print("[Puller] Дальняя цель одобрена. Начинаем атаку для инициации движения...")
+            for key in init_attack_keys:
+                await self.arduino.send_button(key)
+                await asyncio.sleep(0.12)
+            
+            # Даем персонажу ровно 1 секунду, чтобы он набрал скорость бега
+            print("[Puller] Чар побежал. Ждем 1 секунду в движении...")
+            await asyncio.sleep(1.0)
+            
+            # ЖЕСТКАЯ КОНТР-МЕРА: Сбрасываем дальний таргет спамом Esc (3 раза с КД 0.3 сек)
+            print("[Puller] Жестко отменяем дальнюю цель спамом Esc на бегу...")
+            for _ in range(3):
+                await self.arduino.send_button("Esc")
+                await asyncio.sleep(0.3)
+                
+            # Входим в фазу агссивного перехвата ближних мобов на бегу (макс 5 секунд)
+            print("[Puller] Сканируем ближнюю зону через F2 каждые 0.5 сек...")
+            start_run_time = asyncio.get_event_loop().time()
+            
+            while asyncio.get_event_loop().time() - start_run_time < 5.0:
+                await self.arduino.send_button("F2")
+                await asyncio.sleep(self.search_delay)  # Пауза на отрисовку ХП
+                
+                run_hp = self.tracker.get_current_hp()
+                if run_hp > 0:
+                    print(f"[Puller] На бегу успешно перехвачен ближний моб (ХП: {run_hp}%)!")
+                    return True
+                
+                await asyncio.sleep(0.43)  # Общий интервал поиска на бегу ~0.5 сек
+            
+            return False
+        else:
+            print("[Puller] По макросу '0' никто не нашелся. Возвращаемся к штатному поиску.")
+            return False
 
 
 
@@ -729,6 +1133,53 @@ if __name__ == "__main__":
 
 
 ================================================================================
+ FILE: vision\test_buttons.py (40 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+
+# Добавляем корень проекта в пути импорта
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from arduino.arduino_controller_async import AsyncArduinoController
+
+async def main():
+    print("=== ТЕСТИРОВАНИЕ НАЖАТИЯ КНОПОК Num1 и Num2 ===")
+    
+    # 1. Подключаем контроллер по конфигурации из config.json
+    arduino = AsyncArduinoController()
+    if not await arduino.connect():
+        print("[Ошибка] Не удалось установить связь с Ардуино. Выход.")
+        return
+
+    print("\n[Система] Подготовка завершена.")
+    print("У вас есть 3 секунды, чтобы открыть Блокнот или окно игры и кликнуть туда курсором...")
+    await asyncio.sleep(3.0)
+
+    # 2. Тестируем Num1
+    print("\n[Тест] Отправляем команду для кнопки: Num1")
+    await arduino.send_button("Num1")
+    
+    # Пауза 2 секунды между нажатиями
+    print("[Ожидание] Ждем 2 секунды...")
+    await asyncio.sleep(2.0)
+
+    # 3. Тестируем Num2
+    print("[Тест] Отправляем команду для кнопки: Num2")
+    await arduino.send_button("Num2")
+
+    # 4. Закрываем соединение
+    print("\n[Завершение] Тест окончен. Закрываем порт.")
+    arduino.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
  FILE: vision\test_combat.py (112 lines)
 ================================================================================
 
@@ -848,37 +1299,321 @@ if __name__ == "__main__":
 
 
 ================================================================================
- FILE: vision\test_vision.py (29 lines)
+ FILE: vision\test_puller_logic.py (223 lines)
 ================================================================================
 
 import asyncio
 import sys
 import os
+import random
+
+# Корректный импорт модулей из структуры проекта
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vision.hp_tracker import HPTracker
+from vision.target_validator import TargetValidator
+from vision.target_puller import TargetPuller
+from arduino.arduino_controller_async import AsyncArduinoController
+
+async def combat_loop(tracker: HPTracker, validator: TargetValidator, arduino: AsyncArduinoController):
+    print("\n[Бой] Запуск ускоренной боевой логики в тестовом файле...")
+    
+    tracker.check_interval = 0.1
+    f2_fail_count = 0  # Счетчик неудачных нажатий F2
+    
+    while True:
+        try:
+            current_hp = tracker.get_current_hp()
+            
+            # Шаг 1: Если цели нет в таргете
+            if current_hp == 0:
+                # КОНТР-ФИЧА: Если 5 раз нажали F2 и никого не нашли
+                if f2_fail_count >= 5:
+                    print(f"[Контр-фича] 5 фейлов F2! Прожимаем макрос дальнего поиска (Кнопка '0')...")
+                    f2_fail_count = 0  # Сбрасываем счетчик
+                    
+                    await arduino.send_button("0")
+                    
+                    # МНОГОКРАТНАЯ ПРОВЕРКА: Ждем появления ХП-бара дальнего маяка (15 проверок по 100 мс)
+                    current_hp = 0
+                    for i in range(15):
+                        await asyncio.sleep(0.1)
+                        current_hp = tracker.get_current_hp()
+                        if current_hp > 0:
+                            print(f"[Контр-фича] Дальний маяк успешно обнаружен на {i+1}-й проверке (ХП: {current_hp}%)!")
+                            break
+                    
+                    # Если дальний моб по макросу "0" успешно нашелся
+                    if current_hp > 0:
+                        # Проверяем, не БОСС ли это
+                        is_boss = await validator.is_boss_selected()
+                        if is_boss:
+                            print("[Защита] ВНИМАНИЕ! По макросу '0' найден БОСС! Сбрасываем таргет...")
+                            await arduino.send_button("Esc")
+                            await asyncio.sleep(0.1)
+                            continue
+                            
+                        # Инициируем атаку, чтобы персонаж начал физически бежать к нему
+                        print("[Контр-фича] Дальняя цель одобрена. Начинаем атаку для инициации движения...")
+                        await arduino.send_button("1")   # Отправляем слугу
+                        await asyncio.sleep(0.12)
+                        await arduino.send_button("F4")  # Начинаем атаку персонажем
+                        
+                        # Даем персонажу ровно 1 секунду, чтобы он развернулся и побежал
+                        print("[Контр-фича] Чар побежал. Ждем 1 секунду в движении...")
+                        await asyncio.sleep(1.0)
+                        
+                        # ЖЕСТКАЯ КОНТР-МЕРА: Сбрасываем дальний таргет спамом Esc (3 раза с КД 0.3 сек)
+                        print("[Контр-фича] Жестко отменяем дальнюю цель спамом Esc на бегу...")
+                        for _ in range(3):
+                            await arduino.send_button("Esc")
+                            await asyncio.sleep(0.3)
+                            
+                        # Входим в фазу агрессивного перехвата ближних мобов на бегу (макс 5 секунд)
+                        print("[Контр-фича] Сканируем ближнюю зону через F2 каждые 0.5 сек...")
+                        start_run_time = asyncio.get_event_loop().time()
+                        
+                        while asyncio.get_event_loop().time() - start_run_time < 5.0:
+                            await arduino.send_button("F2")
+                            await asyncio.sleep(0.07)  # Пауза на отрисовку ХП
+                            
+                            run_hp = tracker.get_current_hp()
+                            if run_hp > 0:
+                                print(f"[Контр-фича] На бегу успешно перехвачен ближний моб (ХП: {run_hp}%)!")
+                                break
+                            
+                            await asyncio.sleep(0.43)  # Общий интервал поиска на бегу ~0.5 сек
+                        
+                        # Возвращаемся на начало большого цикла анализировать перехваченного моба
+                        continue
+                    else:
+                        print("[Контр-фича] По макросу '0' никто не нашелся. Возвращаемся к штатному поиску.")
+                        continue
+                
+                # ШТАТНЫЙ РЕЖИМ ПОИСКА ПО F2
+                print("[Поиск] Цели нет. МГНОВЕННЫЙ поиск моба (Нажимаем F2)...")
+                await arduino.send_button("F2")
+                await asyncio.sleep(0.07)
+                
+                current_hp = tracker.get_current_hp()
+                if current_hp == 0:
+                    f2_fail_count += 1  # Наращиваем количество фейлов поиска
+                    await asyncio.sleep(0.5)
+                    continue
+
+            # Если моб нашелся обычным способом (или перехвачен на бегу) — сбрасываем фейлы F2
+            f2_fail_count = 0
+
+            # Шаг 2: Анализ состояния найденной цели
+            print(f"[Таргет] Обнаружена цель. Текущее ХП моба: {current_hp}%")
+            
+            # Логика проверки раненых мобов (3 секунды ожидания)
+            if current_hp < 100:
+                print("[Защита] Моб ранен (<100% ХП). Пробуем найти другого через F2...")
+                last_damaged_hp = current_hp
+                await arduino.send_button("F2")
+                await asyncio.sleep(0.07)
+                
+                new_hp = tracker.get_current_hp()
+                if new_hp == 0 or new_hp == last_damaged_hp:
+                    print("[Защита] Следующий моб не найден. Режим ожидания (3 сек)...")
+                    start_wait = asyncio.get_event_loop().time()
+                    is_someone_attacking = False
+                    
+                    if new_hp == 0:
+                        await arduino.send_button("F2")
+                        await asyncio.sleep(0.07)
+                    
+                    while asyncio.get_event_loop().time() - start_wait < 3.0:
+                        await asyncio.sleep(0.2)
+                        check_hp = tracker.get_current_hp()
+                        if check_hp < last_damaged_hp and check_hp > 0:
+                            print("[Защита] ХП моба падает! Его бьют. Пропускаем...")
+                            is_someone_attacking = True
+                            break
+                            
+                    if is_someone_attacking:
+                        await arduino.send_button("Esc")
+                        await asyncio.sleep(0.5)
+                        continue
+                    else:
+                        print("[Защита] ХП стабильно 3 сек. Принимаем бой...")
+                        current_hp = tracker.get_current_hp()
+                else:
+                    continue
+
+            # Шаг 3: Проверка на босса (череп) для обычного режима
+            is_boss = await validator.is_boss_selected()
+            if is_boss:
+                print("[Защита] ВНИМАНИЕ! ОБНАРУЖЕН БОСС (ЧЕРЕП)! Сбрасываем таргет...")
+                await arduino.send_button("Esc") 
+                await asyncio.sleep(0.1)
+                continue
+
+            # Шаг 4: ШТАТНАЯ АТАКА (если моб ближний)
+            print("[Бой] Цель одобрена! Начинаем атаку слугой...")
+            await arduino.send_button("1") 
+            await asyncio.sleep(0.5)
+            print("[Бой] Начинаем атаку персонажем...")
+            await arduino.send_button("F4")   
+            
+            start_combat_time = asyncio.get_event_loop().time()
+            last_attack_time = start_combat_time
+            max_seen_hp = current_hp
+            
+            # Внутренний цикл обычного сражения
+            while True:
+                await asyncio.sleep(0.05)
+                current_hp = tracker.get_current_hp()
+                now = asyncio.get_event_loop().time()
+                
+                if current_hp == 0:
+                    print("[Бой] Моб повержен! МГНОВЕННЫЙ сбор лута...")
+                    loot_clicks = random.randint(3, 5)
+                    for _ in range(loot_clicks):
+                        await arduino.send_button("F1")
+                        await asyncio.sleep(0.05) 
+                    break
+                
+                if now - start_combat_time >= 20.0:
+                    print("[Таймаут] Застряли. Сброс цели...")
+                    await arduino.send_button("Esc")
+                    await asyncio.sleep(0.05)
+                    break
+                
+                if current_hp < max_seen_hp:
+                    max_seen_hp = current_hp
+                    last_attack_time = now  
+                
+                if now - last_attack_time >= random.uniform(1.0, 4.0):
+                    print("[Бой] ХП моба не падает. Повторное прожатие атаки...")
+                    await arduino.send_button("1")
+                    last_attack_time = now
+
+        except Exception as e:
+            print(f"[Критическая ошибка] {e}")
+            await asyncio.sleep(1.0)
+async def main():
+    print("=== ТЕСТИРОВАНИЕ ОПТИМИЗИРОВАННОЙ ЛОГИКИ СТЯГИВАНИЯ ===")
+    
+    arduino = AsyncArduinoController()
+    if not await arduino.connect():
+        print("[Ошибка] Нет связи с Ардуино. Тест отменен.")
+        return
+
+    tracker = HPTracker(profile_name="PK_den4ika")
+    if not tracker.load_profile():
+        tracker.calibrate()
+
+    validator = TargetValidator(profile_name="PK_den4ika", threshold=0.68)
+    if not validator.load_profile():
+        validator.calibrate_target_zone()
+
+    # Запускаем параллельно зрение и наш тестовый цикл стягивания
+    tracker_task = asyncio.create_task(tracker.track_loop())
+    combat_task = asyncio.create_task(combat_loop(tracker, validator, arduino))
+    
+    try:
+        await asyncio.gather(tracker_task, combat_task)
+    except KeyboardInterrupt:
+        print("\n[Выход] Тестирование прервано пользователем.")
+    finally:
+        tracker_task.cancel()
+        combat_task.cancel()
+        arduino.close()
+        print("[Готово] Порты закрыты.")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
+ FILE: vision\test_vision.py (83 lines)
+================================================================================
+
+import asyncio
+import sys
+import os
+import numpy as np
+from PIL import ImageDraw
 
 # Добавляем корень проекта в системный путь, чтобы питон видел модули правильно
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vision.hp_tracker import HPTracker
 
+async def visual_debug_loop(tracker: HPTracker):
+    """
+    Изолированный асинхронный цикл отрисовки дебаг-кадра.
+    Работает только в тестовом режиме, не нагружая боевой класс.
+    """
+    print("[Дебаг] Запущена генерация файла 'debug_scan.png' для проверки разметки...")
+    
+    # Находим корень проекта, чтобы сохранить картинку туда
+    vision_dir = os.path.dirname(os.path.abspath(__file__))
+    debug_path = os.path.join(os.path.dirname(vision_dir), "debug_scan.png")
+    
+    await asyncio.sleep(1.0) # Даем трекеру время запустить первый скриншот
+    
+    while True:
+        try:
+            # Если точки еще не рассчитаны — ждем
+            if not tracker.points or not tracker.start_point:
+                await asyncio.sleep(0.5)
+                continue
+                
+            # Делаем снимок экрана для отрисовки дебага
+            screenshot = tracker.capturer.take_screenshot()
+            draw = ImageDraw.Draw(screenshot)
+            
+            # Рисуем синюю эталонную линию ХП-бара
+            draw.line([tracker.start_point, tracker.end_point], fill="blue", width=2)
+            
+            # Отрисовываем 5 точек контроля
+            for i, (x, y) in enumerate(tracker.points):
+                # Проверяем текущий статус точки
+                is_alive = tracker.points_status[i] if i < len(tracker.points_status) else True
+                dot_color = "green" if is_alive else "red"
+                
+                # Рисуем кружок
+                r = 5
+                draw.ellipse([x-r, y-r, x+r, y+r], fill=dot_color, outline="white")
+                
+            # Сохраняем готовый размеченный снимок в корень проекта
+            screenshot.save(debug_path)
+            
+            # Обновляем картинку раз в секунду
+            await asyncio.sleep(1.0)
+            
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[Ошибка Дебага] Не удалось обновить картинку: {e}")
+            await asyncio.sleep(2.0)
+
 async def main():
     # Создаем объект трекера. Интервал проверки ставим 1.0 для тестов
     tracker = HPTracker(profile_name="PK_den4ika", check_interval=1.0)
     
     # Пытаемся загрузить профиль. Если его нет — запускаем калибровку.
-    # Если хотите перекалибровать заново — временно раскомментируйте строку ниже:
-    # tracker.calibrate()
-    
     if not tracker.load_profile():
         print("Профиль не найден в конфиге. Запуск ручной калибровки...")
         tracker.calibrate()
         
-    # Переходим к постоянному мониторингу
-    await tracker.track_loop()
-
-if __name__ == "__main__":
+    # Запускаем параллельно штатный трекер и наш тестовый дебаг-рисовальщик
+    tracker_task = asyncio.create_task(tracker.track_loop())
+    debug_task = asyncio.create_task(visual_debug_loop(tracker))
+    
     try:
-        asyncio.run(main())
+        await asyncio.gather(tracker_task, debug_task)
     except KeyboardInterrupt:
         print("\nТестирование завершено пользователем.")
+    finally:
+        tracker_task.cancel()
+        debug_task.cancel()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 
