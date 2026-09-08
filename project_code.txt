@@ -96,24 +96,29 @@ class BotSetupWizard:
         except Exception:
             return ["summoner"]
 
-    def _setup_character_selection(self, window_title: str) -> str:
+    def _setup_character_selection(self, window_title: str, exclude_char: str = "") -> str:
+        """Интерактивный выбор персонажа с фильтрацией уже занятых никнеймов."""
         while True:
-            chars = self.config_data.setdefault("characters", ["UnReviver", "Acylut", "VeraWater", "alise"])
+            base_chars = self.config_data.setdefault("characters", ["UnReviver", "Acylut", "VeraWater", "alise"])
+            
+            # Фильтруем список, убирая занятого персонажа
+            display_chars = [c for c in base_chars if c != exclude_char]
+            
             print(f"\n Выберите персонажа для [{window_title}]:")
-            for idx, char in enumerate(chars, 1):
+            for idx, char in enumerate(display_chars, 1):
                 print(f"  {idx}. {char}")
-            print(f"  {len(chars) + 1}. [+] Добавить нового персонажа в базу...")
+            print(f"  {len(display_chars) + 1}. [+] Добавить нового персонажа в базу...")
             
             try:
                 choice = int(input(f"Ваш выбор для {window_title}: ").strip())
-                if choice == len(chars) + 1:
+                if choice == len(display_chars) + 1:
                     new_char = input("Введите точный никнейм нового персонажа (чувствителен к регистру): ").strip()
-                    if new_char and new_char not in chars:
-                        chars.append(new_char)
+                    if new_char and new_char not in base_chars:
+                        base_chars.append(new_char)
                         self._save_raw_config()
                     return new_char if new_char else "UnReviver"
                 else:
-                    return chars[choice - 1]
+                    return display_chars[choice - 1]
             except (ValueError, IndexError):
                 print("Некорректный ввод. Попробуйте еще раз.")
 
@@ -141,7 +146,6 @@ class BotSetupWizard:
             profile_name = "PK_den4ika"
             print(f"Некорректный ввод. Выбран профиль: {profile_name}")
             
-        # Пошаговая калибровка всех 3-х шкал по 6 точек
         if is_new_profile:
             print(f"\n[Мастер] Запуск сквозной калибровки для нового профиля '{profile_name}'")
             print("Подготовьте окна игры. Выделите моба в таргет.")
@@ -151,21 +155,17 @@ class BotSetupWizard:
             temp_tracker = StateTracker(profile_name=profile_name)
             
             print("\nШаг 1/3: Калибровка ХП МОБА.")
-            print("Проведите линию по шкале здоровья ЦЕЛИ (моба) слева направо.")
             temp_tracker.calibrate_by_mode("target_hp")
             time.sleep(1.0)
             
             print("\nШаг 2/3: Калибровка ХП ПЕРСОНАЖА.")
-            print("Проведите линию по шкале здоровья ВАШЕГО персонажа слева направо.")
             temp_tracker.calibrate_by_mode("player_hp")
             time.sleep(1.0)
             
             print("\nШаг 3/3: Калибровка МП ПЕРСОНАЖА.")
-            print("Проведите линию по шкале маны ВАШЕГО персонажа слева направо.")
             temp_tracker.calibrate_by_mode("player_mp")
             print("\n[Успех] Все три шкалы для профиля успешно настроены!")
 
-        # Перезагружаем свежие данные конфигурации с диска
         self.config_data = self._load_raw_config()
         windows_settings = self.config_data.setdefault("game_windows", {})
 
@@ -177,10 +177,11 @@ class BotSetupWizard:
         mode_choice = input("Выберите режим (1 или 2): ").strip()
         if mode_choice == "2":
             windows_settings["mode"] = "Dual-Box"
+            # Первому окну ничего не запрещаем
             main_char = self._setup_character_selection("Основное окно (Мейн / Фармер)")
-            second_char = self._setup_character_selection("Второе окно (Саппорт)")
+            # Второму окну запрещаем выбирать никнейм первого окна (передаем main_char в exclude_char)
+            second_char = self._setup_character_selection("Второе окно (Саппорт)", exclude_char=main_char)
             
-            # === ТВОЯ ИДЕЯ: ИНТЕРАКТИВНЫЙ ВЫБОР РОЛИ САППОРТА ===
             print("\n Выберите алгоритм поведения для Второго окна саппорта:")
             print("  1. Баффер (Только ребафф по таймеру, без пати и заливок - Овер/Варк)")
             print("  2. Заливка + Бафф (Ребафф 7 кнопок + заливка МП с инвайтом через F5 - ЕЕ/ШЕ)")
@@ -189,9 +190,8 @@ class BotSetupWizard:
             
             try:
                 sub_mode = int(input("Выберите номер режима (1-4): ").strip())
-                # Динамическая проверка: если ввели число вне диапазона меню от 1 до 4
                 if not (1 <= sub_mode <= 4):
-                    sub_mode = 2  # Безопасный фолбэк на дефолтную ЕЕ
+                    sub_mode = 2
             except ValueError:
                 sub_mode = 2
                 
@@ -351,7 +351,7 @@ if __name__ == "__main__":
 
 
 ================================================================================
- FILE: combat_profiles\mage_dwarf.py (147 lines)
+ FILE: combat_profiles\mage_dwarf.py (194 lines)
 ================================================================================
 
 import asyncio
@@ -376,7 +376,7 @@ class Mage_dwarfCombat:
         self.player_hp_tracker.load_profile()
         self.player_mp_tracker.load_profile()
 
-        self.combat_timeout = 20.0
+        self.combat_timeout = 6.0
         self.search_delay = 0.07
         self.empty_spot_delay = 0.5
         self.f2_fail_count = 0
@@ -445,9 +445,56 @@ class Mage_dwarfCombat:
 
                     if self.is_paused: continue
                     
-                    if self.f2_fail_count >= 5 or await self.puller.execute_pulling(self.validator, init_attack_keys=["1", "4"]):
-                        self.f2_fail_count = 0
-                        continue
+                    # === ЛИНЕЙНАЯ ИНТЕГРАЦИЯ ДАЛЬНЕГО МАЯКА (МВП СТЯГИВАНИЕ) ===
+                    if self.f2_fail_count >= 5:
+                        print(f"[Маяк] {self.f2_fail_count} фейлов F2! Прожимаем макрос дальнего поиска (Кнопка '0')...")
+                        self.f2_fail_count = 0 # Обнуляем счетчик
+                        
+                        await self.arduino.send_button("0") # Прожимаем макрос стягивания
+                        
+                        # === ЖЕСТКИЙ ЦИКЛ ОЖИДАНИЯ ОТРИСОВКИ ХП-БАРА ДАЛЬНЕГО МОБА ===
+                        current_hp = 0
+                        for i in range(12): # 12 проверок по 100 мс = максимум 1.2 секунды ожидания кадра
+                            await asyncio.sleep(0.1)
+                            current_hp = self.tracker.get_current_value()
+                            if current_hp > 0:
+                                print(f"[Маяк] Дальняя цель успешно зацеплена на {i+1}-й проверке кадра (ХП: {current_hp}%)!")
+                                break
+                        
+                        # Если за 1.2 секунды ХП-бар на экране игры действительно появился
+                        if current_hp > 0:
+                            # Проверяем на босса (череп)
+                            if await self.validator.is_boss_selected():
+                                print("[Маяк] ВНИМАНИЕ! По макросу '0' пойман БОСС! Сброс.")
+                                await self.arduino.send_button("Esc")
+                                await asyncio.sleep(0.2)
+                                continue
+                                
+                            print("[Маяк] Цель одобрена. Инициируем атаку для сближения персонажа...")
+                            await self.arduino.send_button("1") # Скилл для старта движения / нюк
+                            await asyncio.sleep(0.15)
+                            await self.arduino.send_button("4") # Обычный удар, чтобы чар бежал к нему
+                            
+                            # Даем дварфу побежать вперед в сторону дальнего моба
+                            print("[Маяк] Персонаж набрал инерцию. Бежим вперед 1.2 сек...")
+                            await asyncio.sleep(1.2)
+                            
+                            # На ходу жестко отвязываемся от дальнего моба
+                            await self.arduino.send_button("Esc")
+                            await asyncio.sleep(0.1)
+                            
+                            # Спамим Next Target на ходу для перехвата ближних целей на пути бега
+                            print("[Маяк] Перехватываем ближних мобов через F2 на ходу...")
+                            for _ in range(4):
+                                await self.arduino.send_button("F2")
+                                await asyncio.sleep(0.2)
+                                if self.tracker.get_current_value() > 0:
+                                    print("[Маяк] На бегу успешно перехвачен ближний моб! Входим в ближний бой.")
+                                    break
+                            continue
+                        else:
+                            print("[Маяк] За 1.2 сек ХП-бар цели не отрисовался. Возможно, моб вне зоны видимости. Возврат к F2.")
+                            continue
                     
                     await self.arduino.send_button("F2")
                     await asyncio.sleep(self.search_delay)
@@ -1067,7 +1114,7 @@ class SummonerCombat:
 
 
 ================================================================================
- FILE: vision\bot_manager.py (233 lines)
+ FILE: vision\bot_manager.py (241 lines)
 ================================================================================
 
 import asyncio
@@ -1078,17 +1125,16 @@ import keyboard
 import win32gui
 import win32con
 import importlib
+from vision.state_tracker import StateTracker
+from vision.target_validator import TargetValidator
+from vision.buff_system import BuffSystem  
+from arduino.arduino_controller_async import AsyncArduinoController 
 
 try:
     from ctypes import windll
     windll.user32.SetProcessDPIAware()
 except Exception as e:
     print("DPI Awareness предупреждение:", e)
-
-from vision.state_tracker import StateTracker
-from vision.target_validator import TargetValidator
-from vision.buff_system import BuffSystem  
-from arduino.arduino_controller_async import AsyncArduinoController
 
 class BotManager:
     def __init__(self, profile_name="PK_den4ika", combat_profile_name="summoner"):
@@ -1098,30 +1144,21 @@ class BotManager:
         vision_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_path = os.path.join(os.path.dirname(vision_dir), "config.json")
         
-        # Загружаем никнеймы и режим окон
         self.main_nick, self.second_nick = self._load_window_nicks()
         self.hwnd_main = None
         self.hwnd_second = None
         
-        # Инициализация ядра ввода
         self.arduino = AsyncArduinoController()
-        
-        # Системы зрения
         self.tracker = StateTracker(profile_name=self.profile_name, mode="target_hp")
         self.validator = TargetValidator(profile_name=self.profile_name)
-        
-        # Системы поддержки баффов
         self.buff_system = BuffSystem(self.arduino)
-        
-        # === ДИНАМИЧЕСКИЙ ИМПОРТ БОЕВОГО ПРОФИЛЯ ===
         self.bot_combat = self._load_combat_profile()
         
         self.tracker_task = None
         self.combat_task = None
-        self.is_switching_context = False # Защита от гонки потоков
+        self.is_switching_context = False
 
     def _load_combat_profile(self):
-        """Динамически находит класс боевой логики в папке combat_profiles."""
         try:
             module_name = f"combat_profiles.{self.combat_profile_name}"
             module = importlib.import_module(module_name)
@@ -1131,7 +1168,6 @@ class BotManager:
             return combat_class(self.tracker, self.validator, self.arduino, self.buff_system)
         except Exception as e:
             print(f"[Критическая ошибка] Не удалось загрузить профиль боя '{self.combat_profile_name}': {e}")
-            print("[Движок] Фолбэк на дефолтную тактику Суммонера...")
             from combat_profiles.summoner import SummonerCombat
             return SummonerCombat(self.tracker, self.validator, self.arduino, self.buff_system)
 
@@ -1141,9 +1177,11 @@ class BotManager:
                 config = json.load(f)
             w_settings = config.get("game_windows", {})
             self.bot_mode = w_settings.get("mode", "Single-Box")
+            self.support_mode = w_settings.get("second_window_mode", 0)
             return w_settings.get("Main_Window", "UnReviver"), w_settings.get("Second_Window", "")
         except Exception:
             self.bot_mode = "Single-Box"
+            self.support_mode = 0
             return "UnReviver", ""
 
     def _find_game_windows(self) -> bool:
@@ -1168,33 +1206,55 @@ class BotManager:
         return bool(self.hwnd_main or (self.bot_mode == "Dual-Box" and self.hwnd_second))
 
     async def switch_window(self, target="main"):
-        """Безопасная активация и вывод окна на передний план с обходом ограничений ОС."""
+        """Абсолютно устойчивый метод вывода окна игры на передний план с обходом ограничений ОС."""
         hwnd = self.hwnd_main if target == "main" else self.hwnd_second
         nick = self.main_nick if target == "main" else self.second_nick
         
         if not hwnd or not win32gui.IsWindow(hwnd):
-            print(f"[Окна] Ошибка: Окно {nick} недоступно.")
+            print(f"[Окна] Ошибка: Окно {nick} недоступно для активации.")
             return False
             
         if win32gui.GetForegroundWindow() == hwnd:
             return True
             
-        print(f"[Окна] Переключение фокуса на персонажа: {nick}...")
-        await self.arduino.send_button("Esc") # Сбрасываем фокусную блокировку Windows
-        
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        win32gui.SetForegroundWindow(hwnd)
-        await asyncio.sleep(0.3) # Ожидание перерисовки кадра
-        return True
+        try:
+            print(f"[Окна] Попытка переключения фокуса на: {nick}...")
+            
+            # Шаг 1: Очищаем таргет на текущем активном окне перед уходом
+            await self.arduino.send_button("Esc")
+            await asyncio.sleep(0.05)
+            
+            # Шаг 2: Если окно свернуто на панель задач — восстанавливаем его геометрию
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            else:
+                win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+                
+            # Шаг 3: Сбрасываем блокировку фокуса Windows (симулируем нажатие системной клавиши ALT)
+            # Это открывает права на SetForegroundWindow для фоновых скриптов
+            import win32api
+            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0) # Нажали ALT
+            win32gui.SetForegroundWindow(hwnd)
+            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0) # Отпустили ALT
+            
+            # Даем видеокарте время отрисовать интерфейс окна
+            await asyncio.sleep(0.3)
+            return True
+            
+        except Exception as e:
+            # Полная защита от вылета: если Windows всё же заблокировала фокус, 
+            # перехватываем ошибку, чтобы корутины бота продолжали жить
+            print(f"[Окна] Предупреждение: Активация {nick} выполнена в режиме фолбэка. Причина: {e}")
+            await asyncio.sleep(0.5)
+            return False
 
     async def request_recharge(self):
         """Процедура инвайта и заливки маны от Саппорта."""
         if self.bot_mode != "Dual-Box" or not self.hwnd_second:
             return False
 
-        # Роли проверяем динамически через объект buff_system
         if self.support_mode not in self.buff_system.MODES_WITH_RECHARGE:
-            return False # Этот саппорт не умеет лить ману, игнорируем запрос
+            return False
             
         if self.is_switching_context:
             return True
@@ -1206,18 +1266,14 @@ class BotManager:
         
         self.bot_combat.is_paused = True
         
-        # Находясь на окне дварфа, отправляем приглашение в группу саппорту
-        print("[Дварф] Отправляем инвайт в группу (Кнопка 'F5')...")
+        print("[Мейн] Отправляем инвайт в группу саппорту (Кнопка 'F5')...")
         await self.arduino.send_button("F5")
         await asyncio.sleep(0.5)
         
-        # Переключаемся на окно Заливки
         if await self.switch_window("second"):
             print("[Саппорт] Прожимаю макрос заливки маны (Кнопка '-')...")
             await self.arduino.send_button("-")
-            await asyncio.sleep(3.2) # Ожидание ре rejoin, каста маны и leave
-            
-            # Возвращаемся на дварфа
+            await asyncio.sleep(3.2)
             await self.switch_window("main")
             
         self.bot_combat.is_paused = False
@@ -1235,13 +1291,12 @@ class BotManager:
 
         await self.switch_window("main")
 
-        # Универсальная загрузка профилей шкал
         if not self.tracker.load_profile():
             print("[Калибровка] Профиль разметки экрана не найден. Запустите мастер настройки!")
             return False
 
         if not self.validator.load_profile():
-            print("[Калибровка] Профиль рамки босса не найден. Запуск разметки зоны...")
+            print("[Калибровка] Профиль рамки босса не найден. Запуск разметки...")
             self.validator.calibrate_target_zone()
 
         return True
@@ -1267,7 +1322,6 @@ class BotManager:
 
         self.setup_hotkeys()
         
-        # Инжектируем ссылки во избежание циклических импортов
         self.buff_system.bot_manager = self
         self.bot_combat.bot_manager = self
         
@@ -1279,9 +1333,10 @@ class BotManager:
         
         self.buff_system.support_mode = self.support_mode
 
-        # Динамическая проверка через константы buff_system
+        await self.buff_system.buff_all_at_start()
+
         if self.bot_mode == "Dual-Box" and self.support_mode in self.buff_system.MODES_WITH_BUFF:
-            print(f"[Движок] Запуск таймеров ребаффа для саппорта (Режим: {self.support_mode})")
+            print(f"[Движок] Запуск таймеров ребаффа для саппорта (Режим роли: {self.support_mode})")
             self.buff_system.start_buff_timers()
         else:
             print("[Движок] Фоновые таймеры баффа отключены для данной роли саппорта.")
@@ -1307,7 +1362,7 @@ class BotManager:
 
 
 ================================================================================
- FILE: vision\buff_system.py (110 lines)
+ FILE: vision\buff_system.py (153 lines)
 ================================================================================
 
 import asyncio
@@ -1316,110 +1371,153 @@ from arduino.arduino_controller_async import AsyncArduinoController
 class BuffSystem:
     def __init__(self, arduino: AsyncArduinoController):
         """
-        Класс управления автоматическим ребаффом для Овера/Варка (Основное окно).
-        Синхронизирован с боевым циклом.
+        Универсальный класс управления автоматическим ребаффом поддержки.
+        Адаптирован под 4 числовых режима поведения саппорта на втором окне.
         """
         self.arduino = arduino
         self.is_paused = False
         self.buff_tasks = []
         self.bot_manager = None
-        self.support_mode = 0  # Прилетает из конфига (1-4)
+        self.support_mode = 0  # Прилетает из BotManager (1-4)
         
-        # === ОПРЕДЕЛЯЕМ ДОПУСТИМЫЕ РЕЖИМЫ ТУТ ===
-        self.MODES_WITH_BUFF = [1, 2]       # Режимы, где саппорт обязан баффать по таймеру
-        self.MODES_WITH_RECHARGE = [2, 3]   # Режимы, где саппорт умеет заливать ману (ЕЕ/ШЕ)
+        # === МАССИВЫ ОПРЕДЕЛЕНЫ БЕЗ ХАРДКОДА ===
+        self.MODES_WITH_BUFF = [1, 2]       # Режимы с ребаффом по таймеру (1-Овер, 2-ЕЕ)
+        self.MODES_WITH_RECHARGE = [2, 3]   # Режимы с заливкой маны (2-ЕЕ, 3-ШЕ)
         
-        # Очередь баффов, ожидающих безопасного момента для прожима
-        self.pending_buffs = {i: False for i in range(5)}
+        # Монолитный флаг готовности к ребаффу (индекс 0)
+        self.pending_buffs = {0: False}
         
-        # Конфигурация групп баффов и их таймингов (в секундах)
-        self.buff_schedule = [
-            {"keys": ["Num1", "Num2"], "interval": 900},
-            {"keys": ["Num3", "Num4"], "interval": 950},
-            {"keys": ["Num5", "Num6"], "interval": 1000},
-            {"keys": ["Num7", "Num8"], "interval": 1050},
-            {"keys": ["Num9"],         "interval": 1100}
-        ]
+        # Расписание: 7 баффов подряд (F1-F7) раз в 19 минут (1140 секунд)
+        self.buff_schedule = {
+            "keys": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"],
+            "interval": 1140
+        }
 
-    async def _send_button_with_delay(self, button_name: str):
-        """Прожимает кнопку баффа и жестко ждет 2 секунды окончания анимации каста."""
-        print(f"[Баффер] Кастую бафф: {button_name}...")
+    async def _send_button_with_delay(self, button_name: str, delay: float = 2.2):
+        """Прожимает кнопку через Arduino и ждет окончания анимации каста."""
+        print(f"[Саппорт] Кастую бафф: {button_name}...")
         await self.arduino.send_button(button_name)
-        await asyncio.sleep(2.0)  # Таймаут 2 секунды для каста
+        await asyncio.sleep(delay)
 
     async def buff_all_at_start(self):
-        """Фулл-бафф при старте бота (Num1 - Num9 по очереди)."""
-        print("\n[Баффер] Запуск первичного фулл-баффа на старте...")
-        all_keys = ["Num1", "Num2", "Num3", "Num4", "Num5", "Num6", "Num7", "Num8", "Num9"]
-        for key in all_keys:
-            while self.is_paused:
-                await asyncio.sleep(0.5)
-            await self._send_button_with_delay(key)
-        print("[Баффер] Первичный фулл-бафф успешно завершён.\n")
+        """Принудительный пати-ребафф прямо при старте бота, чтобы не идти в бой без баффов."""
+        if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
+            if self.support_mode in self.MODES_WITH_BUFF:
+                print("\n[Баффер] Первичный запуск! Начинаю принудительный стартовый пати-ребафф ЕЕ...")
+                
+                # Имитируем, что время вышло, чтобы сработал метод check_and_run_pending_buffs
+                self.pending_buffs[0] = True
+                
+                # Насильно вызываем процедуру пати-ребаффа
+                await self.check_and_run_pending_buffs()
+                return
+            
+        # === ЕСЛИ МЫ В СОЛО-РЕЖИМЕ (SINGLE-BOX) ===
+        if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Single-Box":
+            combat_profile = getattr(self.bot_manager, 'combat_profile_name', 'summoner')
+            # Если играет маг-дварф в соло — у него нет селф-баффов, полностью выключаем прожимы
+            if "mage" in combat_profile.lower() or "dwarf" in combat_profile.lower():
+                print("[Баффер] Одиночный режим Мага-Дварфа. Селф-баффы отсутствуют. Пропускаем старт.")
+                return
 
-    async def _buff_timer_worker(self, index: int, interval: float):
-        """Фоновый воркер, который просто фиксирует, что время баффа вышло."""
-        await asyncio.sleep(interval)
-        
+        # Для остальных соло-классов (типа овера/варка), у которых ЕСТЬ селф-баффы, оставляем прожим
+        print("\n[Баффер] Запуск первичного селф-баффа на старте (Соло режим)...")
+        for key in self.buff_schedule["keys"]:
+            if self.is_paused: break
+            await self._send_button_with_delay(key, delay=2.0)
+        print("[Баффер] Первичный селф-бафф успешно завершён.\n")
+
+    async def _buff_timer_worker(self, interval: float):
+        """Фоновый воркер таймера ребаффа."""
         while True:
             try:
-                # Если время пришло — выставляем флаг «бафф ожидает прожима»
-                self.pending_buffs[index] = True
-                
-                # Ждем, пока боевой цикл заберет и сбросит этот флаг в False
-                while self.pending_buffs[index]:
-                    await asyncio.sleep(1.0)
-                    
-                # Как только бафф успешно лег, запускаем таймер на следующий круг
                 await asyncio.sleep(interval)
                 
+                # Время пришло — выставляем флаг для индекса 0
+                self.pending_buffs[0] = True
+                
+                # Ждем, пока боевой цикл гнома поймает этот флаг между мобами и сбросит в False
+                while self.pending_buffs[0]:
+                    await asyncio.sleep(1.0)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[Ошибка Баффера] Сбой таймера группы {index}: {e}")
+                print(f"[Ошибка Баффера] Сбой воркера таймера: {e}")
                 await asyncio.sleep(5.0)
 
     async def check_and_run_pending_buffs(self) -> bool:
         """
-        Вызывается боевым циклом между убийствами мобов. 
-        Если есть накопившиеся баффы — прожимает их, блокируя поиск мобов.
+        Вызывается боевым циклом мейна строго между мобами (когда ХП моба = 0).
+        Оркеструет сбор пати силами мейна и ребафф.
         """
-        if self.is_paused:
+        if self.is_paused or not self.bot_manager or not self.pending_buffs.get(0, False):
             return False
             
-        buffed_any = False
-        
-        # Проверяем все 5 групп по очереди
-        for i, group in enumerate(self.buff_schedule):
-            if self.pending_buffs[i]:
-                print(f"\n[Баффер] Безопасный момент! Начинаю ребафф группы {i+1}: {group['keys']}")
-                buffed_any = True
-                
-                # Поочередно прожимаем кнопки баффа из этой группы
-                for key in group["keys"]:
-                    if self.is_paused:
+        # СЦЕНАРИЙ 2: ЗАЛИВКА + БАФФ (ЕЕ / ШЕ)
+        if self.support_mode == 2:
+            print("\n[Баффер] Время баффа вышло! Запуск пати-ребаффа ЗАЛИВКИ (7 баффов)...")
+            self.bot_manager.bot_combat.is_paused = True
+            
+            # НАХОДЯСЬ НА ОКНЕ МЕЙНА, КИДАЕМ ИНВАЙТ САППОРТУ КНОПКОЙ F5
+            print("[Мейн] Отправляем инвайт саппорту в группу (Кнопка 'F5')...")
+            await self.bot_manager.arduino.send_button("F5")
+            await asyncio.sleep(0.5)
+            
+            # Переключаемся на окно саппорта
+            if await self.bot_manager.switch_window("second"):
+                keys_list = self.buff_schedule["keys"]
+                for idx, key in enumerate(keys_list):
+                    if self.is_paused or not self.bot_manager.bot_combat.is_paused:
                         break
-                    await self._send_button_with_delay(key)
-                    
-                # Сбрасываем флаг ожидания, воркер запустит таймер заново
-                self.pending_buffs[i] = False
-                print(f"[Баффер] Ребафф группы {i+1} завершен.\n")
+                        
+                    # СТРАХОВОЧНЫЙ ФИКС: Если это САМАЯ ПОСЛЕДНЯЯ кнопка баффа (F7)
+                    if idx == len(keys_list) - 1:
+                        # Даем ЕЕ 4.5 секунды, чтобы закончить каст, выдержать макросный /delay, 
+                        # чисто выйти из пати через /leave и прожать атаку/бег за гномом!
+                        await self._send_button_with_delay(key, delay=4.5)
+                    else:
+                        # Для обычных промежуточных баффов держим стандартный КД каста
+                        await self._send_button_with_delay(key, delay=2.2)
+                        
+                # Возвращаемся на дварфа
+                await self.bot_manager.switch_window("main")
                 
-        return buffed_any
+            self.pending_buffs[0] = False
+            self.bot_manager.bot_combat.is_paused = False
+            print("[Баффер] Пати-ребафф ЗАЛИВКИ успешно завершен.\n")
+            return True
+            
+        # СЦЕНАРИЙ 1: ЧИСТЫЙ БАФФЕР (Овер / Варк - без пати, просто переключаем окно)
+        elif self.support_mode == 1:
+            print("\n[Баффер] Время баффа вышло! Запуск стандартного ребаффа БАФФЕРА...")
+            self.bot_manager.bot_combat.is_paused = True
+            
+            if await self.bot_manager.switch_window("second"):
+                for key in ["Num1", "Num2", "Num3", "Num4", "Num5"]:
+                    if self.is_paused: break
+                    await self._send_button_with_delay(key, delay=2.0)
+                await self.bot_manager.switch_window("main")
+                
+            self.pending_buffs[0] = False
+            self.bot_manager.bot_combat.is_paused = False
+            print("[Баффер] Ребафф БАФФЕРА успешно завершен.\n")
+            return True
+            
+        return False
 
     def start_buff_timers(self):
-        # Проверяем по созданному списку констант
+        """Запуск асинхронного воркера таймера."""
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
             if self.support_mode in self.MODES_WITH_BUFF:
                 print(f"[Баффер] Запуск фонового таймера ребаффа (Режим роли: {self.support_mode})")
                 self.buff_tasks = [asyncio.create_task(self._buff_timer_worker(self.buff_schedule["interval"]))]
 
-
     def stop_buff_timers(self):
-        print("[Баффер] Остановка таймеров баффов...")
-        for task in self.buff_tasks:
-            task.cancel()
-        self.buff_tasks.clear()
+        if self.buff_tasks:
+            print("[Баффер] Остановка таймеров баффов...")
+            for task in self.buff_tasks:
+                task.cancel()
+            self.buff_tasks.clear()
 
 
 
