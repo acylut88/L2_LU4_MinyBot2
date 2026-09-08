@@ -19,12 +19,15 @@ class StateTracker:
         self.points = []
         self.base_colors = []
         
-        # Теперь точек 6, изначально все True (считаем полоску полной)
         self.points_status = [True] * 6
         self.change_counters = {i: 0 for i in range(6)}
         
         self.capturer = ScreenCapturer()
         self.is_paused = False
+        
+        # Поля для единой шины кадров
+        self._current_frame = None
+        self._frame_event = asyncio.Event()
 
     def load_profile(self) -> bool:
         if not os.path.exists(self.config_path):
@@ -63,7 +66,6 @@ class StateTracker:
         self.points_status = [True] * 6  
         self.change_counters = {i: 0 for i in range(6)}
         
-        # Строго 6 точек: 0%, 20%, 40%, 60%, 80%, 100%
         steps = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
         delta_x = x2 - x1
         delta_y = y2 - y1
@@ -82,13 +84,14 @@ class StateTracker:
     def is_color_changed(self, c1, c2, threshold=40):
         return np.linalg.norm(np.array(c1, dtype=int) - np.array(c2, dtype=int)) > threshold
 
+    def update_frame(self, frame_np):
+        """Метод для внешней поставки кадра от BotManager."""
+        self._current_frame = frame_np
+        self._frame_event.set()
+
     def get_current_value(self) -> int:
-        """Расчет процентов по 6 точкам контроля."""
-        # Если даже самая первая точка (0%) изменила цвет — значит шкала абсолютно пуста (0%)
         if not self.points_status[0]:
             return 0
-            
-        # Проверяем заполненность справа налево
         for i in range(5, -1, -1):
             if self.points_status[i]:
                 return i * 20
@@ -124,15 +127,14 @@ class StateTracker:
         print(f"[Калибровка] Данные для шкалы '{mode_type}' успешно записаны в '{self.profile_name}'.")
 
     async def track_loop(self):
-        # Валидные монолитные шкалы для 6 точек контроля
         valid_templates = [
-            [False, False, False, False, False, False], # 0%
-            [True,  False, False, False, False, False], # 20%
-            [True,  True,  False, False, False, False], # 40%
-            [True,  True,  True,  False, False, False], # 60%
-            [True,  True,  True,  True,  False, False], # 80%
-            [True,  True,  True,  True,  True,  False], # 100% (срез)
-            [True,  True,  True,  True,  True,  True]   # 100% (фулл)
+            [False, False, False, False, False, False],
+            [True,  False, False, False, False, False],
+            [True,  True,  False, False, False, False],
+            [True,  True,  True,  False, False, False],
+            [True,  True,  True,  True,  False, False],
+            [True,  True,  True,  True,  True,  False],
+            [True,  True,  True,  True,  True,  True]
         ]
         
         last_log_time = 0.0
@@ -141,9 +143,16 @@ class StateTracker:
             if self.is_paused:
                 await asyncio.sleep(0.2)
                 continue
+                
             try:
-                screenshot = self.capturer.take_screenshot()
-                frame_rgb = np.array(screenshot)
+                # Ожидаем появление нового кадра в шине данных
+                await self._frame_event.wait()
+                self._frame_event.clear()
+                
+                if self._current_frame is None:
+                    continue
+                    
+                frame_rgb = self._current_frame
                 h, w, _ = frame_rgb.shape
                 
                 temp_status = [True] * 6
@@ -153,13 +162,11 @@ class StateTracker:
                     raw_rgb = frame_rgb[y, x]
                     r, g, b = int(raw_rgb[0]), int(raw_rgb[1]), int(raw_rgb[2])
                     
-                    # ИНТЕЛЛЕКТУАЛЬНЫЙ АНАЛИЗ ЦВЕТА ШКАЛЫ
                     if self.mode == "player_mp":
                         if b > r + 30 and b > 70:
                             temp_status[i] = True
                         else:
                             temp_status[i] = False
-                            
                     elif self.mode == "player_hp" or self.mode == "target_hp":
                         if r > b + 30 and r > 70:
                             temp_status[i] = True
@@ -169,11 +176,9 @@ class StateTracker:
                         if self.is_color_changed([r, g, b], self.base_colors[i]):
                             temp_status[i] = False
 
-                # Проверка шаблона на "рваный мусор" (цифры критов и урона)
                 if temp_status in valid_templates:
                     status_changed = False
                     
-                    # Применяем фильтр consecutive_triggers для каждой из 6 точек
                     for i in range(6):
                         if temp_status[i] != self.points_status[i]:
                             self.change_counters[i] += 1
@@ -183,14 +188,11 @@ class StateTracker:
                         else:
                             self.change_counters[i] = 0
                     
-                    # === ВОЗВРАЩАЕМ ТАБЛИЧКУ ДЕБАГА В КОНСОЛЬ ===
                     curr_time = asyncio.get_event_loop().time()
                     if status_changed or (curr_time - last_log_time >= 1.5):
                         val = self.get_current_value()
-                        # Переводим True/False в наглядные символы + и -
                         visual_status = ["+" if s else "-" for s in self.points_status]
                         
-                        # Красивое имя для вывода в консоль
                         mode_labels = {
                             "target_hp": "МОБ HP  ",
                             "player_hp": "ДВАРФ HP",
@@ -206,12 +208,6 @@ class StateTracker:
                 print(f"[Ошибка Трекера {self.mode}]: {e}")
                 await asyncio.sleep(1.0)
 
-
-    def get_current_hp(self) -> int:
-        """Фолбэк-метод для совместимости со старыми боевыми профилями (Овер/Суммонер)."""
-        return self.get_current_value()
-
     def calibrate(self):
-        """Фолбэк-метод калибровки по умолчанию, если вызван старый метод инициализации."""
         print("[Калибровка] Запуск калибровки ХП моба по умолчанию...")
         self.calibrate_by_mode("target_hp")

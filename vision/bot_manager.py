@@ -10,12 +10,16 @@ from vision.state_tracker import StateTracker
 from vision.target_validator import TargetValidator
 from vision.buff_system import BuffSystem  
 from arduino.arduino_controller_async import AsyncArduinoController 
+from vision.frame_bus import FrameBus
+
+
 
 try:
     from ctypes import windll
     windll.user32.SetProcessDPIAware()
 except Exception as e:
     print("DPI Awareness предупреждение:", e)
+
 
 class BotManager:
     def __init__(self, profile_name="PK_den4ika", combat_profile_name="summoner"):
@@ -30,12 +34,28 @@ class BotManager:
         self.hwnd_second = None
         
         self.arduino = AsyncArduinoController()
+        
+        # 1. Инициализируем нашу новую единую шину кадров
+        self.frame_bus = FrameBus(check_interval=0.05)
+        
+        # 2. Создаем трекеры шкал
         self.tracker = StateTracker(profile_name=self.profile_name, mode="target_hp")
+        self.player_hp_tracker = StateTracker(profile_name=self.profile_name, mode="player_hp")
+        self.player_mp_tracker = StateTracker(profile_name=self.profile_name, mode="player_mp")
+        
+        # 3. Регистрируем их в шине, чтобы они автоматом питались кадрами
+        self.frame_bus.register_tracker(self.tracker)
+        self.frame_bus.register_tracker(self.player_hp_tracker)
+        self.frame_bus.register_tracker(self.player_mp_tracker)
+        
         self.validator = TargetValidator(profile_name=self.profile_name)
         self.buff_system = BuffSystem(self.arduino)
         self.bot_combat = self._load_combat_profile()
         
+        # Ссылки на асинхронные задачи
         self.tracker_task = None
+        self.player_hp_task = None
+        self.player_mp_task = None
         self.combat_task = None
         self.is_switching_context = False
 
@@ -183,12 +203,18 @@ class BotManager:
         return True
 
     def toggle_pause(self):
+        # Меняем состояние паузы основного боевого цикла и систем
         self.bot_combat.is_paused = not self.bot_combat.is_paused
         self.tracker.is_paused = self.bot_combat.is_paused
+        self.player_hp_tracker.is_paused = self.bot_combat.is_paused
+        self.player_mp_tracker.is_paused = self.bot_combat.is_paused
         self.buff_system.is_paused = self.bot_combat.is_paused
         
+        # Синхронизируем паузу самой шины захвата кадров
+        self.frame_bus.is_paused = self.bot_combat.is_paused
+        
         if self.bot_combat.is_paused:
-            print(f"\n{'='*40}\n[ПАУЗА] Бот остановлен клавишей 'P'. Логи и баффы заморожены.\n{'='*40}\n")
+            print(f"\n{'='*40}\n[ПАУЗА] Бот остановлен клавишей 'P'. Логи и кадры заморожены.\n{'='*40}\n")
         else:
             print(f"\n{'='*40}\n[РАБОТА] Бот возобновил фарм клавишей 'P'.\n{'='*40}\n")
 
@@ -211,9 +237,7 @@ class BotManager:
         await asyncio.sleep(2)
         
         await self.switch_window("main")
-        
         self.buff_system.support_mode = self.support_mode
-
         await self.buff_system.buff_all_at_start()
 
         if self.bot_mode == "Dual-Box" and self.support_mode in self.buff_system.MODES_WITH_BUFF:
@@ -222,14 +246,33 @@ class BotManager:
         else:
             print("[Движок] Фоновые таймеры баффа отключены для данной роли саппорта.")
         
+        # 1. Запускаем центральную шину захвата кадров
+        self.frame_bus.start()
+        
+        # 2. Запускаем параллельные асинхронные циклы анализа шкал
         self.tracker_task = asyncio.create_task(self.tracker.track_loop())
+        self.player_hp_task = asyncio.create_task(self.player_hp_tracker.track_loop())
+        self.player_mp_task = asyncio.create_task(self.player_mp_tracker.track_loop())
+        
+        # 3. Запускаем боевую логику выбранного класса
         self.combat_task = asyncio.create_task(self.bot_combat.start_loop())
         
-        await asyncio.gather(self.tracker_task, self.combat_task)
+        await asyncio.gather(
+            self.tracker_task, 
+            self.player_hp_task, 
+            self.player_mp_task, 
+            self.combat_task
+        )
 
     def shutdown(self):
         print("\n[Выход] Закрытие ресурсов менеджера...")
+        # Останавливаем шину кадров
+        self.frame_bus.stop()
+        
+        # Гасим все корутины трекеров и боя
         if self.tracker_task: self.tracker_task.cancel()
+        if self.player_hp_task: self.player_hp_task.cancel()
+        if self.player_mp_task: self.player_mp_task.cancel()
         if self.combat_task: self.combat_task.cancel()
         
         self.buff_system.stop_buff_timers()
@@ -239,3 +282,4 @@ class BotManager:
             pass
         self.arduino.close()
         print("[Готово] Бот полностью отключен.")
+
