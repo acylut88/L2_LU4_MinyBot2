@@ -48,50 +48,42 @@
     "game_windows": {
         "mode": "Single-Box",
         "Main_Window": "alise",
-        "Second_Window": "",
-        "second_window_mode": 0
+        "Second_Window": ""
     },
     "characters": [
         "UnReviver",
         "Acylut",
         "NB_Vadima",
-        "alise",
-        "VeraWater"
+        "alise"
     ],
     "profiles": {
-        "NB_Moi": {
+        "PK_den4ika": {
             "start_point": [
-                1035,
-                106
+                1360,
+                125
             ],
             "end_point": [
-                1402,
-                106
+                1750,
+                125
+            ]
+        },
+        "NB_Moi": {
+            "start_point": [
+                998,
+                588
             ],
-            "player_hp_start": [
-                110,
-                86
-            ],
-            "player_hp_end": [
-                384,
-                86
-            ],
-            "player_mp_start": [
-                110,
-                104
-            ],
-            "player_mp_end": [
-                400,
-                104
+            "end_point": [
+                1087,
+                593
             ]
         }
     },
     "target_zones": {
-        "NB_Moi": [
-            986,
-            20,
-            59,
-            71
+        "PK_den4ika": [
+            1281,
+            9,
+            125,
+            127
         ]
     }
 }

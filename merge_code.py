@@ -20,6 +20,7 @@ def merge_my_project_only(output_filename="project_code.txt"):
         "sdist",
         "var",
         "wheels",
+        "tests",
     }
 
     total_files = 0

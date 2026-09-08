@@ -1,12 +1,12 @@
 import asyncio
 import random
-from vision.hp_tracker import HPTracker
+from vision.state_tracker import StateTracker
 from vision.target_validator import TargetValidator
 from vision.target_puller import TargetPuller
 from arduino.arduino_controller_async import AsyncArduinoController
 
 class SummonerCombat:
-    def __init__(self, tracker: HPTracker, validator: TargetValidator, arduino: AsyncArduinoController, buff_system=None):
+    def __init__(self, tracker: StateTracker, validator: TargetValidator, arduino: AsyncArduinoController, buff_system=None):
         """
         Класс управления боевой логикой сумонера.
         """

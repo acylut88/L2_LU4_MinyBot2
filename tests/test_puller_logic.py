@@ -6,12 +6,12 @@ import random
 # Корректный импорт модулей из структуры проекта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vision.hp_tracker import HPTracker
+from vision.state_tracker import StateTracker
 from vision.target_validator import TargetValidator
 from vision.target_puller import TargetPuller
 from arduino.arduino_controller_async import AsyncArduinoController
 
-async def combat_loop(tracker: HPTracker, validator: TargetValidator, arduino: AsyncArduinoController):
+async def combat_loop(tracker: StateTracker, validator: TargetValidator, arduino: AsyncArduinoController):
     print("\n[Бой] Запуск ускоренной боевой логики в тестовом файле...")
     
     tracker.check_interval = 0.1
@@ -197,7 +197,7 @@ async def main():
         print("[Ошибка] Нет связи с Ардуино. Тест отменен.")
         return
 
-    tracker = HPTracker(profile_name="PK_den4ika")
+    tracker = StateTracker(profile_name="PK_den4ika")
     if not tracker.load_profile():
         tracker.calibrate()
 

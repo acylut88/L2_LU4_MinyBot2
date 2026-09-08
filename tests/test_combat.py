@@ -6,9 +6,9 @@ import keyboard  # Импортируем библиотеку для глоба
 # Добавляем корень проекта в пути импорта
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vision.hp_tracker import HPTracker
+from vision.state_tracker import StateTracker
 from vision.target_validator import TargetValidator
-from vision.summoner_combat import SummonerCombat
+from combat_profiles.summoner import SummonerCombat
 from arduino.arduino_controller_async import AsyncArduinoController
 
 class BotManager:
@@ -17,7 +17,7 @@ class BotManager:
         
         # Инициализация всех подсистем проекта в одном месте
         self.arduino = AsyncArduinoController()
-        self.tracker = HPTracker(profile_name=self.profile_name)
+        self.tracker = StateTracker(profile_name=self.profile_name)
         self.validator = TargetValidator(profile_name=self.profile_name)
         self.bot_combat = SummonerCombat(self.tracker, self.validator, self.arduino)
         

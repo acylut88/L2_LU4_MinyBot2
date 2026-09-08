@@ -5,11 +5,17 @@ import os
 # Корректный импорт модулей из структуры проекта
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from setup_wizard import BotSetupWizard
 from vision.bot_manager import BotManager
 
 async def main():
-    # Создаем единый менеджер управления под нужный профиль
-    manager = BotManager(profile_name="PK_den4ika")
+    # 1. Запускаем интерактивный мастер настройки параметров
+    wizard = BotSetupWizard()
+    profile_name, combat_name = wizard.run_interactive_menu()
+    
+    # 2. Передаем собранные параметры в главный оркестратор
+    manager = BotManager(profile_name=profile_name, combat_profile_name=combat_name)
+    
     try:
         await manager.run()
     except KeyboardInterrupt:
