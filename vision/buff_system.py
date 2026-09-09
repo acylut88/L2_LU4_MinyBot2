@@ -13,14 +13,13 @@ class BuffSystem:
         self.bot_manager = None
         self.support_mode = 0  # Прилетает из BotManager (1-4)
         
-        # === МАССИВЫ ОПРЕДЕЛЕНЫ БЕЗ ХАРДКОДА ===
         self.MODES_WITH_BUFF = [1, 2]       # Режимы с ребаффом по таймеру (1-Овер, 2-ЕЕ)
         self.MODES_WITH_RECHARGE = [2, 3]   # Режимы с заливкой маны (2-ЕЕ, 3-ШЕ)
         
         # Монолитный флаг готовности к ребаффу (индекс 0)
         self.pending_buffs = {0: False}
         
-        # Расписание: 7 баффов подряд (F1-F7) раз в 19 минут (1140 секунд)
+        # Расписание: 8 баффов подряд (F1-F8) раз в 19 минут (1140 секунд)
         self.buff_schedule = {
             "keys": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"],
             "interval": 1140
@@ -37,23 +36,16 @@ class BuffSystem:
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
             if self.support_mode in self.MODES_WITH_BUFF:
                 print("\n[Баффер] Первичный запуск! Начинаю принудительный стартовый пати-ребафф ЕЕ...")
-                
-                # Имитируем, что время вышло, чтобы сработал метод check_and_run_pending_buffs
                 self.pending_buffs[0] = True
-                
-                # Насильно вызываем процедуру пати-ребаффа
                 await self.check_and_run_pending_buffs()
                 return
             
-        # === ЕСЛИ МЫ В СОЛО-РЕЖИМЕ (SINGLE-BOX) ===
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Single-Box":
             combat_profile = getattr(self.bot_manager, 'combat_profile_name', 'summoner')
-            # Если играет маг-дварф в соло — у него нет селф-баффов, полностью выключаем прожимы
             if "mage" in combat_profile.lower() or "dwarf" in combat_profile.lower():
                 print("[Баффер] Одиночный режим Мага-Дварфа. Селф-баффы отсутствуют. Пропускаем старт.")
                 return
 
-        # Для остальных соло-классов (типа овера/варка), у которых ЕСТЬ селф-баффы, оставляем прожим
         print("\n[Баффер] Запуск первичного селф-баффа на старте (Соло режим)...")
         for key in self.buff_schedule["keys"]:
             if self.is_paused: break
@@ -61,16 +53,20 @@ class BuffSystem:
         print("[Баффер] Первичный селф-бафф успешно завершён.\n")
 
     async def _buff_timer_worker(self, interval: float):
-        """Фоновый воркер таймера ребаффа."""
+        """Фоновый воркер таймера ребаффа с защитой от зависания на паузе."""
         while True:
             try:
                 await asyncio.sleep(interval)
                 
-                # Время пришло — выставляем флаг для индекса 0
+                # Время пришло — выставляем флаг
                 self.pending_buffs[0] = True
                 
-                # Ждем, пока боевой цикл гнома поймает этот флаг между мобами и сбросит в False
+                # Ждем сброса флага боевым циклом мейна, учитывая состояние паузы
                 while self.pending_buffs[0]:
+                    if self.is_paused:
+                        # Если бот на паузе, приостанавливаем ожидание, чтобы не блокировать поток
+                        await asyncio.sleep(2.0)
+                        continue
                     await asyncio.sleep(1.0)
             except asyncio.CancelledError:
                 break
@@ -91,28 +87,21 @@ class BuffSystem:
             print("\n[Баффер] Время баффа вышло! Запуск пати-ребаффа ЗАЛИВКИ (7 баффов)...")
             self.bot_manager.bot_combat.is_paused = True
             
-            # НАХОДЯСЬ НА ОКНЕ МЕЙНА, КИДАЕМ ИНВАЙТ САППОРТУ КНОПКОЙ F5
             print("[Мейн] Отправляем инвайт саппорту в группу (Кнопка 'F5')...")
             await self.bot_manager.arduino.send_button("F5")
             await asyncio.sleep(0.5)
             
-            # Переключаемся на окно саппорта
             if await self.bot_manager.switch_window("second"):
                 keys_list = self.buff_schedule["keys"]
                 for idx, key in enumerate(keys_list):
                     if self.is_paused or not self.bot_manager.bot_combat.is_paused:
                         break
                         
-                    # СТРАХОВОЧНЫЙ ФИКС: Если это САМАЯ ПОСЛЕДНЯЯ кнопка баффа (F7)
                     if idx == len(keys_list) - 1:
-                        # Даем ЕЕ 4.5 секунды, чтобы закончить каст, выдержать макросный /delay, 
-                        # чисто выйти из пати через /leave и прожать атаку/бег за гномом!
                         await self._send_button_with_delay(key, delay=4.5)
                     else:
-                        # Для обычных промежуточных баффов держим стандартный КД каста
                         await self._send_button_with_delay(key, delay=2.2)
                         
-                # Возвращаемся на дварфа
                 await self.bot_manager.switch_window("main")
                 
             self.pending_buffs[0] = False
@@ -139,7 +128,6 @@ class BuffSystem:
         return False
 
     def start_buff_timers(self):
-        """Запуск асинхронного воркера таймера."""
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
             if self.support_mode in self.MODES_WITH_BUFF:
                 print(f"[Баффер] Запуск фонового таймера ребаффа (Режим роли: {self.support_mode})")
