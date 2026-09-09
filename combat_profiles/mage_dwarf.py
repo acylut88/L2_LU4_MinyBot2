@@ -20,7 +20,7 @@ class Mage_dwarfCombat:
         self.player_hp_tracker.load_profile()
         self.player_mp_tracker.load_profile()
 
-        self.combat_timeout = 6.0
+        self.combat_timeout = 7.0
         self.search_delay = 0.07
         self.empty_spot_delay = 0.5
         self.f2_fail_count = 0
@@ -35,7 +35,7 @@ class Mage_dwarfCombat:
         current_mp = self.player_mp_tracker.get_current_value()
         
         # Запускаем регенерацию, только если МП упало до 20% и ниже
-        if current_mp <= 20:
+        if current_mp < 20:
             
             # ВАРИАНТ А: Режим Двух окон (Dual-Box) -> Вызываем заливку от саппорта
             if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
@@ -78,9 +78,9 @@ class Mage_dwarfCombat:
                 # Проверка потребности в мане строго перед поиском новой цели
                 await self._check_mana_and_recharge()
 
-                current_hp = self.tracker.get_current_value()
+                current_mob_hp = self.tracker.get_current_value()
                 
-                if current_hp == 0:
+                if current_mob_hp == 0:
                     if self.is_paused: continue
                     
                     # Проверка ребаффа саппорта (только для режима Dual-Box)
@@ -97,16 +97,16 @@ class Mage_dwarfCombat:
                         await self.arduino.send_button("0") # Прожимаем макрос стягивания
                         
                         # === ЖЕСТКИЙ ЦИКЛ ОЖИДАНИЯ ОТРИСОВКИ ХП-БАРА ДАЛЬНЕГО МОБА ===
-                        current_hp = 0
+                        current_mob_hp = 0
                         for i in range(12): # 12 проверок по 100 мс = максимум 1.2 секунды ожидания кадра
                             await asyncio.sleep(0.1)
-                            current_hp = self.tracker.get_current_value()
-                            if current_hp > 0:
-                                print(f"[Маяк] Дальняя цель успешно зацеплена на {i+1}-й проверке кадра (ХП: {current_hp}%)!")
+                            current_mob_hp = self.tracker.get_current_value()
+                            if current_mob_hp > 0:
+                                print(f"[Маяк] Дальняя цель успешно зацеплена на {i+1}-й проверке кадра (ХП: {current_mob_hp}%)!")
                                 break
                         
                         # Если за 1.2 секунды ХП-бар на экране игры действительно появился
-                        if current_hp > 0:
+                        if current_mob_hp > 0:
                             # Проверяем на босса (череп)
                             if await self.validator.is_boss_selected():
                                 print("[Маяк] ВНИМАНИЕ! По макросу '0' пойман БОСС! Сброс.")
@@ -143,8 +143,8 @@ class Mage_dwarfCombat:
                     await self.arduino.send_button("F2")
                     await asyncio.sleep(self.search_delay)
                     
-                    current_hp = self.tracker.get_current_value()
-                    if current_hp == 0:
+                    current_mob_hp = self.tracker.get_current_value()
+                    if current_mob_hp == 0:
                         self.f2_fail_count += 1
                         await asyncio.sleep(self.empty_spot_delay)
                         continue
@@ -152,39 +152,43 @@ class Mage_dwarfCombat:
                 self.f2_fail_count = 0
 
                 # ФАЗА ИНИЦИАЦИИ
-                print(f"[Таргет] Цель найдена. ХП моба: {current_hp}%. Начинаем атаку...")
-                max_seen_hp = current_hp
+                print(f"[Таргет] Цель найдена. ХП моба: {current_mob_hp}%. Начинаем атаку...")
+                max_seen_hp = current_mob_hp
                 start_combat_time = asyncio.get_event_loop().time()
                 
-                while current_hp == max_seen_hp:
+                while current_mob_hp == max_seen_hp:
                     if self.is_paused: break
-                    if asyncio.get_event_loop().time() - start_combat_time >= 7.0:
+                    if asyncio.get_event_loop().time() - start_combat_time >= 10.0:
                         await self.arduino.send_button("Esc")
                         break
                     await self.arduino.send_button("1")
                     await asyncio.sleep(random.uniform(0.1, 0.3))
                     await self.arduino.send_button("4")
                     await asyncio.sleep(random.uniform(0.2, 0.5))
-                    current_hp = self.tracker.get_current_value()
+                    current_mob_hp = self.tracker.get_current_value()
 
                 # ОСНОВНОЙ БОЙ
-                while current_hp > 0:
+                while current_mob_hp > 0:
                     await asyncio.sleep(0.05)
                     if self.is_paused: continue
-                    current_hp = self.tracker.get_current_value()
+                    current_mob_hp = self.tracker.get_current_value()
+
+                    await self.arduino.send_button("1")
+                    await asyncio.sleep(random.uniform(0.1, 0.3))
+                    await self.arduino.send_button("4")
                     
                     if asyncio.get_event_loop().time() - start_combat_time >= self.combat_timeout:
                         await self.arduino.send_button("Esc")
                         break
 
-                    if 0 < current_hp <= 20:
-                        await self.arduino.send_button("4")
-                        while current_hp > 0:
+                    if 0 < current_mob_hp <= 20:
+                        await self.arduino.send_button("3")
+                        while current_mob_hp > 0:
                             await asyncio.sleep(0.05)
-                            current_hp = self.tracker.get_current_value()
+                            current_mob_hp = self.tracker.get_current_value()
                         break
                     
-                    if current_hp > 20:
+                    if current_mob_hp > 20:
                         await self.arduino.send_button("1")
                         await asyncio.sleep(0.2)
 

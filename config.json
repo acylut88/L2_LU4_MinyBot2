@@ -47,7 +47,7 @@
     },
     "game_windows": {
         "mode": "Single-Box",
-        "Main_Window": "alise",
+        "Main_Window": "q1w11e111",
         "Second_Window": "",
         "second_window_mode": 0
     },
@@ -56,7 +56,8 @@
         "Acylut",
         "NB_Vadima",
         "alise",
-        "VeraWater"
+        "VeraWater",
+        "q1w11e111"
     ],
     "profiles": {
         "NB_Moi": {
@@ -93,5 +94,9 @@
             59,
             71
         ]
+    },
+    "mob_filter": {
+        "mode": "white_list",
+        "threshold": 0.92
     }
 }

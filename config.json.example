@@ -38,5 +38,9 @@
         "alise"
     ],
     "profiles": {},
-    "target_zones": {}
+    "target_zones": {},
+    "mob_filter": {
+        "mode": "white_list",
+        "threshold": 0.92
+    }
 }
