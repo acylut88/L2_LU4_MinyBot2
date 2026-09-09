@@ -42,5 +42,17 @@
     "mob_filter": {
         "mode": "white_list",
         "threshold": 0.92
-    }
+    },
+    "mage_dwarf_settings": {
+        "combat_actions": {
+            "ACTION_HAND_ATTACK": "4",
+            "ACTION_NUKE_1": "1",
+            "ACTION_NUKE_2": "2",
+            "ACTION_HEAVY_NUKE_1": "3",
+            "ACTION_OVER_HIT": "7",
+            "ACTION_DEBUFF_1": "8",
+            "ACTION_SIT_STAND": "Num*",
+            "ACTION_LONG_PULL": "0"
+        }
+    },
 }
