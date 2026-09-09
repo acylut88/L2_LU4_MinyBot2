@@ -17,12 +17,16 @@ class CombatAction(Enum):
     ACTION_SIT_STAND = auto()      # 13. Сесть / Встать
     ACTION_LONG_PULL = auto()      # Дальний маяк стягивания (кнопка 0)
 
-    # --- ЛИНЕЙКА ПОДДЕРЖКИ И ВЫЖИВАНИЯ (НОВЫЕ 14-20) ---
+    # --- ЛИНЕЙКА ПОДДЕРЖКИ И ВЫЖИВАНИЯ (14-18) ---
     ACTION_HP_SKILL = auto()       # 14. Селф-хил / Вампирик / Скилл-бафф дварфа
     ACTION_HP_POTION = auto()      # 15. Обычные ХП-банки (без отката)
     ACTION_CP_ELIXIR_SMALL = auto()# 16. Малый ЦП-эликсир (по 50 ЦП, откат 3 мин)
     ACTION_CP_ELIXIR_BIG = auto()  # 17. Большой ЦП-эликсир (по 200/300 ЦП, откат 3 мин)
     ACTION_HP_ELIXIR = auto()      # 18. ХП-эликсир (откат 3 мин)
+
+    # --- СИСТЕМНЫЕ КНОПКИ УПРАВЛЕНИЯ ТАРГЕТОМ (НОВЫЕ 19-20) ---
+    ACTION_NEXT_TARGET = auto()    # 19. Выбор следующей цели (штатный Next Target)
+    ACTION_CANCEL_TARGET = auto()  # 20. Сброс текущей цели (Esc)
 
 
 # Дефолтная базовая карта для Mage_dwarf, расширенная новыми экшенами
@@ -36,10 +40,14 @@ DEFAULT_MAGE_DWARF_MAP = {
     CombatAction.ACTION_SIT_STAND: "Num*",
     CombatAction.ACTION_LONG_PULL: "0",
     
-    # Резервируем кнопки для банок и селф-хила по умолчанию (при необходимости переопределим в JSON)
+    # Резервируем кнопки для банок и селф-хила по умолчанию
     CombatAction.ACTION_HP_SKILL: "9",
     CombatAction.ACTION_HP_POTION: "-",
     CombatAction.ACTION_CP_ELIXIR_SMALL: "Num1",
     CombatAction.ACTION_CP_ELIXIR_BIG: "Num2",
-    CombatAction.ACTION_HP_ELIXIR: "Num3"
+    CombatAction.ACTION_HP_ELIXIR: "Num3",
+
+    # Назначаем физические клавиши для системных действий по умолчанию
+    CombatAction.ACTION_NEXT_TARGET: "F2",
+    CombatAction.ACTION_CANCEL_TARGET: "Esc"
 }

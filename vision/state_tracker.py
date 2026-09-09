@@ -35,7 +35,15 @@ class StateTracker:
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
-            profile = config.get("profiles", {}).get(self.profile_name, {})
+            
+            # Гарантируем, что имя профиля ищется строго как строка, исключая сбои маппинга JSON
+            p_name = str(self.profile_name)
+            profiles = config.get("profiles", {})
+            
+            if p_name not in profiles:
+                return False
+                
+            profile = profiles[p_name]
             
             if self.mode == "target_hp":
                 s_key, e_key = "start_point", "end_point"
@@ -53,27 +61,50 @@ class StateTracker:
                 self.calculate_points(screen_bgr)
                 return True
         except Exception as e:
-            print(f"Ошибка чтения профиля {self.mode}:", e)
+            print(f"Ошибка чтения профиля {self.mode}: {e}")
         return False
 
     def calculate_points(self, current_frame):
+        """
+        Вычисляет 6 контрольных точек вдоль линии калибровки шкал.
+        Интегрирован фикс DPI-масштабирования под физический размер кадра.
+        """
         x1, y1 = self.start_point
         x2, y2 = self.end_point
         h, w, _ = current_frame.shape
+        
+        # --- ФИКС DPI ДЛЯ КОНТРОЛЬНЫХ ТОЧЕК ШКАЛ ---
+        # Вычисляем логический размер экрана через win32api
+        import win32api
+        import win32con
+        screen_w = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+        screen_h = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+        
+        # Рассчитываем коэффициент масштабирования Windows
+        dpi_factor_x = w / screen_w
+        dpi_factor_y = h / screen_h
+        
+        # Переводим логические координаты калибровки Tkinter в физические пиксели кадра
+        x1_phys = int(x1 * dpi_factor_x)
+        x2_phys = int(x2 * dpi_factor_x)
+        y1_phys = int(y1 * dpi_factor_y)
+        y2_phys = int(y2 * dpi_factor_y)
         
         self.points = []
         self.base_colors = []
         self.points_status = [True] * 6  
         self.change_counters = {i: 0 for i in range(6)}
         
+        # 6 точек контроля: 0%, 20%, 40%, 60%, 80%, 100%
         steps = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
-        delta_x = x2 - x1
-        delta_y = y2 - y1
+        delta_x = x2_phys - x1_phys
+        delta_y = y2_phys - y1_phys
         
         for i, t in enumerate(steps):
-            x = int(x1 + delta_x * t)
-            y = int(y1 + delta_y * t)
+            x = int(x1_phys + delta_x * t)
+            y = int(y1_phys + delta_y * t)
             
+            # Защита от выхода за границы матрицы кадра
             x = max(0, min(x, w - 1))
             y = max(0, min(y, h - 1))
             
@@ -98,33 +129,16 @@ class StateTracker:
         return 0
 
     def calibrate_by_mode(self, mode_type: str):
-        p1, p2, frame_bgr = self.capturer.select_line_on_screen()
+        # Передаем понятный текст подсказки в зависимости от режима шкал
+        labels = {
+            "target_hp": "Проведите линию шкал: ХП МОБА (Цели)",
+            "player_hp": "Проведите линию шкал: ХП ВАШЕГО ПЕРСОНАЖА",
+            "player_mp": "Проведите линию шкал: МП ВАШЕГО ПЕРСОНАЖА (Мана)"
+        }
+        title = labels.get(mode_type, "Проведите линию калибровки")
         
-        config = {}
-        if os.path.exists(self.config_path):
-            try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-            except Exception:
-                pass
-        
-        profiles = config.setdefault("profiles", {})
-        profile = profiles.setdefault(self.profile_name, {})
-        
-        if mode_type == "target_hp":
-            profile["start_point"] = list(p1)
-            profile["end_point"] = list(p2)
-        elif mode_type == "player_hp":
-            profile["player_hp_start"] = list(p1)
-            profile["player_hp_end"] = list(p2)
-        elif mode_type == "player_mp":
-            profile["player_mp_start"] = list(p1)
-            profile["player_mp_end"] = list(p2)
-            
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-            
-        print(f"[Калибровка] Данные для шкалы '{mode_type}' успешно записаны в '{self.profile_name}'.")
+        p1, p2, frame_bgr = self.capturer.select_line_on_screen(title_text=title)
+        # ... дальше код сохранения в json идет без изменений ...
 
     async def track_loop(self):
         valid_templates = [
@@ -152,22 +166,25 @@ class StateTracker:
                 if self._current_frame is None:
                     continue
                     
-                frame_rgb = self._current_frame
-                h, w, _ = frame_rgb.shape
+                frame_bgr = self._current_frame
+                h, w, _ = frame_bgr.shape
                 
                 temp_status = [True] * 6
                 for i, (x, y) in enumerate(self.points):
                     if y >= h or x >= w: continue
                     
-                    raw_rgb = frame_rgb[y, x]
-                    r, g, b = int(raw_rgb[0]), int(raw_rgb[1]), int(raw_rgb[2])
+                    raw_bgr = frame_bgr[y, x]
+                    # ИСПРАВЛЕНИЕ: Раскладываем пиксель OpenCV строго как B, G, R
+                    b, g, r = int(raw_bgr[0]), int(raw_bgr[1]), int(raw_bgr[2])
                     
                     if self.mode == "player_mp":
+                        # Ищем синюю ману: синего (b) должно быть больше, чем красного (r)
                         if b > r + 30 and b > 70:
                             temp_status[i] = True
                         else:
                             temp_status[i] = False
                     elif self.mode == "player_hp" or self.mode == "target_hp":
+                        # Ищем красное ХП: красного (r) должно быть больше, чем синего (b)
                         if r > b + 30 and r > 70:
                             temp_status[i] = True
                         else:

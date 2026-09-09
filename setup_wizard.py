@@ -7,6 +7,13 @@ class BotSetupWizard:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_path = os.path.join(base_dir, config_name)
         self.cp_dir = os.path.join(base_dir, combat_dir_name)
+        
+        # ИНИЦИАЛИЗАЦИЯ ДИРЕКТОРИЙ ФИЛЬТРОВ (Исправляет AttributeError)
+        self.white_list_dir = os.path.join(base_dir, "vision", "white_list")
+        self.black_list_dir = os.path.join(base_dir, "vision", "black_list")
+        os.makedirs(self.white_list_dir, exist_ok=True)
+        os.makedirs(self.black_list_dir, exist_ok=True)
+        
         self.config_data = self._load_raw_config()
 
     def _load_raw_config(self) -> dict:
@@ -83,6 +90,143 @@ class BotSetupWizard:
             except (ValueError, IndexError):
                 print("Некорректный ввод. Попробуйте еще раз.")
 
+    def manage_mob_filters(self, profile_name: str):
+        """Инструмент создания графических фильтров с ручным выделением зоны проверки ХП."""
+        print("\n" + "=" * 50)
+        print("   МАСТЕР НАСТРОЙКИ ГРАФИЧЕСКИХ ФИЛЬТРОВ ХП МОБОВ   ")
+        print("=" * 50)
+        
+        filter_zones = self.config_data.setdefault("filter_zones", {})
+        p_name = str(profile_name)
+        
+        if p_name not in filter_zones:
+            print(f"\n[Калибровка] Для профиля '{p_name}' еще не задана зона распознавания цифр ХП!")
+            print("Инструкция: У вас есть 4 секунды, чтобы развернуть Lineage 2 и взять моба в таргет.")
+            print("Затем экран заморозится, и вам нужно будет выделить ЖЕЛТОЙ РАМКОЙ")
+            print("строго ту область, где написан слеш и цифры МАКС ХП (например, '/ 1282').")
+            
+            # --- НОВАЯ ЗАДЕРЖКА ДЛЯ ПЕРЕКЛЮЧЕНИЯ НА ИГРУ ---
+            for i in range(4, 0, -1):
+                print(f"Замораживание экрана для разметки через {i}...")
+                time.sleep(1.0)
+                
+            print("[Захват] Экран зафиксирован! Ожидайте отрисовку сетки...")
+            
+            import tkinter as tk
+            from PIL import ImageGrab, ImageTk
+            screenshot = ImageGrab.grab(all_screens=True)
+            
+            root = tk.Tk()
+            root.attributes("-fullscreen", True)
+            root.attributes("-topmost", True)
+            canvas = tk.Canvas(root, cursor="cross", highlightthickness=0)
+            canvas.pack(fill="both", expand=True)
+            tk_img = ImageTk.PhotoImage(screenshot)
+            canvas.create_image(0, 0, anchor="nw", image=tk_img)
+            
+            lbl = tk.Label(root, text="ОБВЕДИТЕ РАМКОЙ ЦИФРЫ МАКСИМАЛЬНОГО ХП ЦЕЛИ", font=("Arial", 20, "bold"), fg="yellow", bg="black", padx=10, pady=5)
+            lbl.pack(side="top", pady=40)
+
+            
+            start_x, start_y = 0, 0
+            rect_id = None
+            bbox_res = None
+            
+            def on_press(event):
+                nonlocal start_x, start_y, rect_id
+                start_x, start_y = event.x, event.y
+                if rect_id: canvas.delete(rect_id)
+            def on_drag(event):
+                nonlocal rect_id
+                if rect_id: canvas.delete(rect_id)
+                rect_id = canvas.create_rectangle(start_x, start_y, event.x, event.y, outline="yellow", width=2)
+            def on_release(event):
+                nonlocal bbox_res
+                x = min(start_x, event.x)
+                y = min(start_y, event.y)
+                w = abs(event.x - start_x)
+                h = abs(event.y - start_y)
+                bbox_res = (x, y, w, h)
+                root.destroy()
+
+            canvas.bind("<ButtonPress-1>", on_press)
+            canvas.bind("<B1-Motion>", on_drag)
+            canvas.bind("<ButtonRelease-1>", on_release)
+            root.mainloop()
+            
+            if bbox_res and bbox_res[2] > 3 and bbox_res[3] > 3:
+                import tkinter as tk
+                rt = tk.Tk()
+                sw, sh = rt.winfo_screenwidth(), rt.winfo_screenheight()
+                rt.destroy()
+                img_w, img_h = screenshot.size
+                
+                # ФИКС ИНДЕКСОВ: делим отдельные элементы кортежа по осям
+                log_x = int(bbox_res[0] / (img_w / sw))
+                log_y = int(bbox_res[1] / (img_h / sh))
+                log_w = int(bbox_res[2] / (img_w / sw))
+                log_h = int(bbox_res[3] / (img_h / sh))
+                
+                filter_zones[p_name] = [log_x, log_y, log_w, log_h]
+                self._save_raw_config()
+                print(f"[Успех] Координаты зоны фильтра сохранены: {filter_zones[p_name]}")
+            else:
+                print("[Ошибка] Область не была выделена. Отмена операции.")
+                return
+
+        log_x, log_y, log_w, log_h = filter_zones[p_name]
+        
+        print("\nИнструкция для создания шаблона:")
+        print("1. Разверните окно игры Lineage 2.")
+        print("2. Возьмите в таргет целевого моба.")
+        print("3. У вас есть 3 секунды...")
+        for i in range(3, 0, -1):
+            print(f"Захват через {i}...")
+            time.sleep(1.0)
+            
+        print("[Захват] Делаем скриншот числовой зоны ХП...")
+        from vision.screen_capture import ScreenCapturer
+        screenshot = ScreenCapturer.take_screenshot()
+        
+        import tkinter as tk
+        root = tk.Tk()
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.destroy()
+        img_w, img_h = screenshot.size
+        
+        x = int(log_x * (img_w / sw))
+        y = int(log_y * (img_h / sh))
+        w = int(log_w * (img_w / sw))
+        h = int(log_h * (img_h / sh))
+        
+        roi_img = screenshot.crop((x, y, x + w, y + h))
+        try:
+            roi_img.show()
+        except Exception:
+            pass
+
+        print("\nКуда сохранить этот шаблон ХП?")
+        print("  1. В БЕЛОЙ СПИСОК (Бот БУДЕТ бить этого моба)")
+        print("  2. В ЧЕРНЫЙ СПИСОК (Бот БУДЕТ ПРОПУСКАТЬ этого моба)")
+        print("  3. Отмена")
+        
+        choice = input("Выберите действие (1-3): ").strip()
+        if choice not in ["1", "2"]:
+            print("[Мастер] Действие успешно отменено. Возврат в главное меню.\n")
+            return
+            
+        target_dir = self.white_list_dir if choice == "1" else self.black_list_dir
+        list_label = "White-лист" if choice == "1" else "Black-лист"
+        
+        file_name = input("Введите имя для этого моба (английскими буквами, например, 'zombie_1282'): ").strip()
+        if not file_name: 
+            file_name = f"hp_{int(time.time())}"
+            
+        final_path = os.path.join(target_dir, f"{file_name}.png")
+        roi_img.save(final_path, "PNG")
+        print(f"[Успех] Шаблон успешно сохранен в {list_label}!")
+        print(f"Путь: {final_path}\n")
+
     def run_interactive_menu(self) -> tuple[str, str]:
         print("=" * 50)
         print("       ЗАПУСК АСИНХРОННОГО БОТА LINEAGE 2       ")
@@ -94,13 +238,27 @@ class BotSetupWizard:
         for idx, p in enumerate(avail_profiles, 1):
             print(f"  {idx}. {p}")
         print(f"  {len(avail_profiles) + 1}. Создать новый профиль...")
+        print(f"  {len(avail_profiles) + 2}. [ФИЛЬТРЫ] Добавить ХП моба в Белый/Черный список...")
         
         is_new_profile = False
         try:
-            choice = int(input("Выберите номер профиля калибровки: ").strip())
+            choice = int(input("Выберите номер профиля или действия: ").strip())
             if choice == len(avail_profiles) + 1:
                 profile_name = input("Введите имя для нового профиля (например, NB_Moi): ").strip()
                 is_new_profile = True
+            elif choice == len(avail_profiles) + 2:
+                # Вход в режим создания фильтров мобов
+                print("\nВыберите профиль разметки, для которого создается фильтр:")
+                for i, p in enumerate(avail_profiles, 1):
+                    print(f"  {i}. {p}")
+                p_choice = int(input("Номер профиля: ").strip())
+                selected_profile = avail_profiles[p_choice - 1]
+                
+                # Запускаем наш новый инструмент
+                self.manage_mob_filters(selected_profile)
+                
+                # После завершения возвращаем управление в стандартное меню
+                return self.run_interactive_menu()
             else:
                 profile_name = avail_profiles[choice - 1]
         except (ValueError, IndexError):
@@ -138,9 +296,7 @@ class BotSetupWizard:
         mode_choice = input("Выберите режим (1 или 2): ").strip()
         if mode_choice == "2":
             windows_settings["mode"] = "Dual-Box"
-            # Первому окну ничего не запрещаем
             main_char = self._setup_character_selection("Основное окно (Мейн / Фармер)")
-            # Второму окну запрещаем выбирать никнейм первого окна (передаем main_char в exclude_char)
             second_char = self._setup_character_selection("Второе окно (Саппорт)", exclude_char=main_char)
             
             print("\n Выберите алгоритм поведения для Второго окна саппорта:")

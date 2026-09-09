@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
 
 ================================================================================
- FILE: setup_wizard.py (194 lines)
+ FILE: setup_wizard.py (304 lines)
 ================================================================================
 
 import os
@@ -46,6 +46,13 @@ class BotSetupWizard:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_path = os.path.join(base_dir, config_name)
         self.cp_dir = os.path.join(base_dir, combat_dir_name)
+        
+        # ИНИЦИАЛИЗАЦИЯ ДИРЕКТОРИЙ ФИЛЬТРОВ (Исправляет AttributeError)
+        self.white_list_dir = os.path.join(base_dir, "vision", "white_list")
+        self.black_list_dir = os.path.join(base_dir, "vision", "black_list")
+        os.makedirs(self.white_list_dir, exist_ok=True)
+        os.makedirs(self.black_list_dir, exist_ok=True)
+        
         self.config_data = self._load_raw_config()
 
     def _load_raw_config(self) -> dict:
@@ -122,6 +129,97 @@ class BotSetupWizard:
             except (ValueError, IndexError):
                 print("Некорректный ввод. Попробуйте еще раз.")
 
+    def manage_mob_filters(self, profile_name: str):
+        """Инструмент автоматического захвата ХП моба с фиксом DPI-масштабирования Windows."""
+        print("\n" + "=" * 50)
+        print("   МАСТЕР НАСТРОЙКИ ГРАФИЧЕСКИХ ФИЛЬТРОВ ХП МОБОВ   ")
+        print("=" * 50)
+        
+        profile = self.config_data.get("profiles", {}).get(profile_name, {})
+        if "start_point" not in profile or "end_point" not in profile:
+            print(f"[Ошибка] Для профиля '{profile_name}' не найдена калибровка ХП моба!")
+            print("Сначала запустите стандартную калибровку шкал (Шаг 1/3 мастера).")
+            return
+
+        x1, y1 = profile["start_point"]
+        x2, y2 = profile["end_point"]
+
+        print("\nИнструкция:")
+        print("1. Разверните окно игры Lineage 2.")
+        print("2. Возьмите в таргет моба, ХП которого хотите внести в фильтр.")
+        print("3. У вас есть 3 секунды...")
+        
+        for i in range(3, 0, -1):
+            print(f"Захват через {i}...")
+            time.sleep(1.0)
+            
+        print("[Захват] Делаем скриншот...")
+        
+        from vision.screen_capture import ScreenCapturer
+        screenshot = ScreenCapturer.take_screenshot()
+        
+        # --- ФИКС DPI МАСШТАБИРОВАНИЯ ---
+        # Вычисляем коэффициент масштабирования Windows (физический размер экрана к логическому)
+        import tkinter as tk
+        root = tk.Tk()
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        root.destroy()
+        
+        img_w, img_h = screenshot.size
+        dpi_factor_x = img_w / screen_w
+        dpi_factor_y = img_h / screen_h
+        
+        # Переводим логические координаты калибровки в физические пиксели скриншота
+        x1_phys = int(x1 * dpi_factor_x)
+        x2_phys = int(x2 * dpi_factor_x)
+        y1_phys = int(y1 * dpi_factor_y)
+        y2_phys = int(y2 * dpi_factor_y)
+        
+        w_full = abs(x2_phys - x1_phys)
+        
+        # Точечный расчет зоны: сдвигаемся на 49% длины бара вправо, чтобы пропустить текущее ХП
+        x = min(x1_phys, x2_phys) + int(w_full * 0.49)
+        y = min(y1_phys, y2_phys) - int(14 * dpi_factor_y)
+        
+        # Расширяем ширину до 13%, чтобы правое число макс. ХП влезло полностью
+        w = int(w_full * 0.13)
+        h = int(15 * dpi_factor_y)
+        
+        # Вырезаем область без искажений масштаба
+        roi_img = screenshot.crop((x, y, x + w, y + h))
+        
+        try:
+            print("[Инфо] Проверьте вырезанную область на экране. Закройте картинку для продолжения.")
+            roi_img.show()
+        except Exception:
+            pass
+
+        print("\nКуда сохранить этот шаблон ХП?")
+        print("  1. В БЕЛОЙ СПИСОК (Бот БУДЕТ бить этого моба)")
+        print("  2. В ЧЕРНЫЙ СПИСОК (Бот БУДЕТ ПРОПУСКАТЬ этого моба)")
+        print("  3. Отмена")
+        
+        choice = input("Выберите действие (1-3): ").strip()
+        if choice not in ["1", "2"]:
+            print("Действие отменено.")
+            return
+            
+        target_dir = self.white_list_dir if choice == "1" else self.black_list_dir
+        list_label = "White-лист" if choice == "1" else "Black-лист"
+        
+        file_name = input("Введите имя моба (английскими буквами, например, 'zombie_1282'): ").strip()
+        if not file_name:
+            file_name = f"mob_hp_{int(time.time())}"
+            
+        final_path = os.path.join(target_dir, f"{file_name}.png")
+        roi_img.save(final_path, "PNG")
+        print(f"[Успех] Шаблон успешно сохранен в {list_label}!")
+        print(f"Путь: {final_path}\n")
+
+
+
+
     def run_interactive_menu(self) -> tuple[str, str]:
         print("=" * 50)
         print("       ЗАПУСК АСИНХРОННОГО БОТА LINEAGE 2       ")
@@ -133,13 +231,27 @@ class BotSetupWizard:
         for idx, p in enumerate(avail_profiles, 1):
             print(f"  {idx}. {p}")
         print(f"  {len(avail_profiles) + 1}. Создать новый профиль...")
+        print(f"  {len(avail_profiles) + 2}. [ФИЛЬТРЫ] Добавить ХП моба в Белый/Черный список...")
         
         is_new_profile = False
         try:
-            choice = int(input("Выберите номер профиля калибровки: ").strip())
+            choice = int(input("Выберите номер профиля или действия: ").strip())
             if choice == len(avail_profiles) + 1:
                 profile_name = input("Введите имя для нового профиля (например, NB_Moi): ").strip()
                 is_new_profile = True
+            elif choice == len(avail_profiles) + 2:
+                # Вход в режим создания фильтров мобов
+                print("\nВыберите профиль разметки, для которого создается фильтр:")
+                for i, p in enumerate(avail_profiles, 1):
+                    print(f"  {i}. {p}")
+                p_choice = int(input("Номер профиля: ").strip())
+                selected_profile = avail_profiles[p_choice - 1]
+                
+                # Запускаем наш новый инструмент
+                self.manage_mob_filters(selected_profile)
+                
+                # После завершения возвращаем управление в стандартное меню
+                return self.run_interactive_menu()
             else:
                 profile_name = avail_profiles[choice - 1]
         except (ValueError, IndexError):
@@ -177,9 +289,7 @@ class BotSetupWizard:
         mode_choice = input("Выберите режим (1 или 2): ").strip()
         if mode_choice == "2":
             windows_settings["mode"] = "Dual-Box"
-            # Первому окну ничего не запрещаем
             main_char = self._setup_character_selection("Основное окно (Мейн / Фармер)")
-            # Второму окну запрещаем выбирать никнейм первого окна (передаем main_char в exclude_char)
             second_char = self._setup_character_selection("Второе окно (Саппорт)", exclude_char=main_char)
             
             print("\n Выберите алгоритм поведения для Второго окна саппорта:")
@@ -231,7 +341,6 @@ class BotSetupWizard:
         print("-" * 50 + "\n")
         
         return profile_name, combat_name
-
 
 
 ================================================================================
@@ -351,77 +460,150 @@ if __name__ == "__main__":
 
 
 ================================================================================
- FILE: combat_profiles\mage_dwarf.py (194 lines)
+ FILE: combat_profiles\mage_dwarf.py (241 lines)
 ================================================================================
 
 import asyncio
 import random
-from vision.state_tracker import StateTracker
-from vision.target_validator import TargetValidator
-from vision.target_puller import TargetPuller
+from vision.combat_base import BaseCombat
+from vision.action_definitions import CombatAction
 
-class Mage_dwarfCombat:
-    def __init__(self, tracker: StateTracker, validator: TargetValidator, arduino, buff_system=None):
-        self.tracker = tracker
-        self.validator = validator
-        self.arduino = arduino
-        self.buff_system = buff_system  
-        self.bot_manager = None         # Ссылка на BotManager запишется при старте
-        self.puller = TargetPuller(self.tracker, self.arduino)
-        self.is_paused = False
+class Mage_dwarfCombat(BaseCombat):
+    def __init__(self, tracker, validator, arduino, buff_system=None):
+        super().__init__(tracker, validator, arduino, buff_system)
         self.aggressive_mode = True
-        
-        self.player_hp_tracker = StateTracker(profile_name=self.tracker.profile_name, mode="player_hp")
-        self.player_mp_tracker = StateTracker(profile_name=self.tracker.profile_name, mode="player_mp")
-        self.player_hp_tracker.load_profile()
-        self.player_mp_tracker.load_profile()
-
-        self.combat_timeout = 6.0
+        self.is_resting = False
+        self.combat_timeout = 7.0
         self.search_delay = 0.07
         self.empty_spot_delay = 0.5
         self.f2_fail_count = 0
-        
-        self.is_resting = False  # Флаг состояния медитации (для соло-режима)
 
     async def _check_mana_and_recharge(self):
-        """
-        Универсальный контроль маны:
-        Автоматически переключается между заливкой (Dual-Box) и сидением на жопе (Single-Box).
-        """
         current_mp = self.player_mp_tracker.get_current_value()
-        
-        # Запускаем регенерацию, только если МП упало до 20% и ниже
-        if current_mp <= 20:
-            
-            # ВАРИАНТ А: Режим Двух окон (Dual-Box) -> Вызываем заливку от саппорта
+        if current_mp < 20:
             if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
-                # Метод request_recharge сам поставит бой на паузу, переключит окна и нажмет "-"
-                await self.bot_manager.request_recharge()
-                await asyncio.sleep(1.0)
-                
-            # ВАРИАНТ Б: Режим Одного окна (Single-Box / Соло) -> Садимся на жопу
+                support_role = getattr(self.bot_manager, 'support_mode', 0)
+                if support_role in self.buff_system.MODES_WITH_RECHARGE:
+                    self.set_trackers_sleep(True)
+                    await self.bot_manager.request_recharge()
+                    self.set_trackers_sleep(False)
+                    await asyncio.sleep(1.0)
             else:
                 if not self.is_resting:
-                    print(f"\n[Регенерация Соло] МП мало: {current_mp}%. Садимся отдыхать (Кнопка 'Num*')...")
+                    print(f"\n[Регенерация Соло] Мана мало: {current_mp}%. Садимся (Экшен ACTION_SIT_STAND)...")
                     self.is_resting = True
-                    await self.arduino.send_button("Num*") # Прожимаем посадку
+                    await self.execute_action(CombatAction.ACTION_SIT_STAND)
                     
                     while self.is_resting:
                         await asyncio.sleep(2.0)
                         if self.is_paused: continue
-                        
-                        mp_now = self.player_mp_tracker.get_current_value()
-                        print(f"[Регенерация Соло] Восстановление маны: {mp_now}% / 80%")
-                        
-                        # Ждем регена до 80% маны
-                        if mp_now >= 80:
-                            print("[Регенерация Соло] Мана восстановлена! Встаем (Кнопка 'Num*') и продолжаем бой...")
-                            await self.arduino.send_button("Num*") # Встаем
+                        if self.player_mp_tracker.get_current_value() >= 80:
+                            print("[Регенерация Соло] Мана восполнена! Встаем...")
+                            await self.execute_action(CombatAction.ACTION_SIT_STAND)
                             self.is_resting = False
                             await asyncio.sleep(1.0)
 
+    async def _handle_beacon_pulling(self) -> bool:
+        """Метод-подфайл: Логика работы дальнего маяка стягивания без хардкода."""
+        print(f"[Маяк] Прожимаем дальнее стягивание (Экшен ACTION_LONG_PULL)...")
+        self.f2_fail_count = 0
+        await self.execute_action(CombatAction.ACTION_LONG_PULL)
+        
+        current_mob_hp = 0
+        for i in range(12):
+            await asyncio.sleep(0.1)
+            current_mob_hp = self.tracker.get_current_value()
+            if current_mob_hp > 0: break
+            
+        if current_mob_hp > 0:
+            if await self.validator.is_boss_selected():
+                await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+                return False
+                
+            # --- ОДНОКРАТНАЯ ПРОВЕРКА ПОСЛЕ НАХОЖДЕНИЯ ЦЕЛИ МАЯКОМ ---
+            current_frame = self.tracker._current_frame
+            if current_frame is not None and not self.validate_mob_by_filters(current_frame):
+                print("[Маяк -> Фильтр] Дальний моб не подходит по ХП! Сбрасываем...")
+                await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+                return False
+
+            print("[Маяк] Дальняя цель зацеплена и одобрена фильтром. Начинаем инерционный подбег...")
+            await self.execute_action(CombatAction.ACTION_NUKE_1)
+            await asyncio.sleep(0.15)
+            await self.execute_action(CombatAction.ACTION_HAND_ATTACK)
+            
+            await asyncio.sleep(1.2) # Бежим вперед
+            await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+            
+            for _ in range(4):
+                await self.execute_action(CombatAction.ACTION_NEXT_TARGET)
+                await asyncio.sleep(0.2)
+                if self.tracker.get_current_value() > 0: 
+                    # Проверяем перехваченного вблизи моба
+                    next_frame = self.tracker._current_frame
+                    if next_frame is not None and not self.validate_mob_by_filters(next_frame):
+                        await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+                        continue
+                    return True
+        return False
+
+    async def _initiate_combat(self, current_mob_hp, start_time) -> int:
+        max_seen_hp = current_mob_hp
+        while current_mob_hp == max_seen_hp:
+            if self.is_paused: break
+            if asyncio.get_event_loop().time() - start_time >= 10.0:
+                await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+                break
+            await self.execute_action(CombatAction.ACTION_NUKE_1)
+            await asyncio.sleep(random.uniform(0.1, 0.3))
+            await self.execute_action(CombatAction.ACTION_HAND_ATTACK)
+            await asyncio.sleep(random.uniform(0.2, 0.5))
+            current_mob_hp = self.tracker.get_current_value()
+        return current_mob_hp
+
+    async def _combat_processing(self, current_mob_hp, start_time):
+        """
+        Внутренний цикл ведения боя. Крутится, пока моб жив.
+        Интегрирована динамическая проверка ХП персонажа для прожатия селф-хила.
+        """
+        while current_mob_hp > 0:
+            await asyncio.sleep(0.05)
+            if self.is_paused: continue
+            
+            # --- НОВАЯ СИСТЕМА САМОСОХРАНЕНИЯ (СЕЛФ-ХИЛ) ---
+            # Получаем текущее значение здоровья дварфа из параллельного трекера
+            current_player_hp = self.player_hp_tracker.get_current_value()
+            
+            if current_player_hp <= 80:
+                print(f"[Выживание] ХП упало до {current_player_hp}%. Прожимаем лечащий скилл (ACTION_HP_SKILL)...")
+                # Отправляем экшен подхила. Физическая кнопка подтянется из твоего конфига
+                await self.execute_action(CombatAction.ACTION_HP_SKILL)
+                # Даем небольшую паузу (250 мс) на анимацию каста скилла, чтобы бот не спамил им безостановочно
+                await asyncio.sleep(0.25) 
+            
+            # Обновляем состояние здоровья моба для продолжения ротации
+            current_mob_hp = self.tracker.get_current_value()
+
+            # Защитный таймаут, если моб застрял в геодате
+            if asyncio.get_event_loop().time() - start_time >= self.combat_timeout:
+                await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+                break
+
+            # Добивание моба овер-хитом
+            if 0 < current_mob_hp <= 20:
+                print(f"[Добивание] ХП моба {current_mob_hp}%. Пробиваем ACTION_OVER_HIT!")
+                await self.execute_action(CombatAction.ACTION_OVER_HIT)
+                while self.tracker.get_current_value() > 0:
+                    await asyncio.sleep(0.05)
+                break
+            
+            # Стандартный спам нюком, если у моба много ХП
+            if current_mob_hp > 20:
+                await self.execute_action(CombatAction.ACTION_NUKE_1)
+                await asyncio.sleep(0.2)
+
     async def start_loop(self):
-        print(f"\n[Бой] Профиль Маг-Дварф запущен. Гибридный мониторинг шкал активен...")
+        print(f"\n[Бой] Профиль Маг-Дварф запущен. Линейный сценарий без опечаток активен.")
         asyncio.create_task(self.player_hp_tracker.track_loop())
         asyncio.create_task(self.player_mp_tracker.track_loop())
         
@@ -431,122 +613,96 @@ class Mage_dwarfCombat:
                     await asyncio.sleep(0.2)
                     continue
 
-                # Проверка потребности в мане строго перед поиском новой цели
+                # 1. Регенерация маны перед поиском
                 await self._check_mana_and_recharge()
-
-                current_hp = self.tracker.get_current_value()
+                current_mob_hp = self.tracker.get_current_value()
                 
-                if current_hp == 0:
-                    if self.is_paused: continue
-                    
-                    # Проверка ребаффа саппорта (только для режима Dual-Box)
+                # 2. ЕСЛИ ЦЕЛИ НЕТ — НАЖИМАЕМ NEXT TARGET ОДИН РАЗ
+                if current_mob_hp == 0:
                     if self.buff_system:
+                        self.set_trackers_sleep(True)
                         await self.buff_system.check_and_run_pending_buffs()
+                        self.set_trackers_sleep(False)
 
                     if self.is_paused: continue
                     
-                    # === ЛИНЕЙНАЯ ИНТЕГРАЦИЯ ДАЛЬНЕГО МАЯКА (МВП СТЯГИВАНИЕ) ===
+                    # Если долго стоим на пустом месте — включаем пуллер
                     if self.f2_fail_count >= 5:
-                        print(f"[Маяк] {self.f2_fail_count} фейлов F2! Прожимаем макрос дальнего поиска (Кнопка '0')...")
-                        self.f2_fail_count = 0 # Обнуляем счетчик
-                        
-                        await self.arduino.send_button("0") # Прожимаем макрос стягивания
-                        
-                        # === ЖЕСТКИЙ ЦИКЛ ОЖИДАНИЯ ОТРИСОВКИ ХП-БАРА ДАЛЬНЕГО МОБА ===
-                        current_hp = 0
-                        for i in range(12): # 12 проверок по 100 мс = максимум 1.2 секунды ожидания кадра
-                            await asyncio.sleep(0.1)
-                            current_hp = self.tracker.get_current_value()
-                            if current_hp > 0:
-                                print(f"[Маяк] Дальняя цель успешно зацеплена на {i+1}-й проверке кадра (ХП: {current_hp}%)!")
-                                break
-                        
-                        # Если за 1.2 секунды ХП-бар на экране игры действительно появился
-                        if current_hp > 0:
-                            # Проверяем на босса (череп)
-                            if await self.validator.is_boss_selected():
-                                print("[Маяк] ВНИМАНИЕ! По макросу '0' пойман БОСС! Сброс.")
-                                await self.arduino.send_button("Esc")
-                                await asyncio.sleep(0.2)
-                                continue
-                                
-                            print("[Маяк] Цель одобрена. Инициируем атаку для сближения персонажа...")
-                            await self.arduino.send_button("1") # Скилл для старта движения / нюк
-                            await asyncio.sleep(0.15)
-                            await self.arduino.send_button("4") # Обычный удар, чтобы чар бежал к нему
-                            
-                            # Даем дварфу побежать вперед в сторону дальнего моба
-                            print("[Маяк] Персонаж набрал инерцию. Бежим вперед 1.2 сек...")
-                            await asyncio.sleep(1.2)
-                            
-                            # На ходу жестко отвязываемся от дальнего моба
-                            await self.arduino.send_button("Esc")
-                            await asyncio.sleep(0.1)
-                            
-                            # Спамим Next Target на ходу для перехвата ближних целей на пути бега
-                            print("[Маяк] Перехватываем ближних мобов через F2 на ходу...")
-                            for _ in range(4):
-                                await self.arduino.send_button("F2")
-                                await asyncio.sleep(0.2)
-                                if self.tracker.get_current_value() > 0:
-                                    print("[Маяк] На бегу успешно перехвачен ближний моб! Входим в ближний бой.")
-                                    break
-                            continue
-                        else:
-                            print("[Маяк] За 1.2 сек ХП-бар цели не отрисовался. Возможно, моб вне зоны видимости. Возврат к F2.")
+                        print("[Поиск] На споте пусто. Активируем дальний маяк стягивания...")
+                        if await self._handle_beacon_pulling(): 
                             continue
                     
-                    await self.arduino.send_button("F2")
-                    await asyncio.sleep(self.search_delay)
+                    # Прожимаем Next Target СТРОГО один раз за итерацию
+                    await self.execute_action(CombatAction.ACTION_NEXT_TARGET)
                     
-                    current_hp = self.tracker.get_current_value()
-                    if current_hp == 0:
+                    # Фиксированная пауза: даем игре время (250 мс) прорисовать таргет-бар
+                    await asyncio.sleep(0.25)
+                    
+                    current_mob_hp = self.tracker.get_current_value()
+                    if current_mob_hp == 0:
                         self.f2_fail_count += 1
                         await asyncio.sleep(self.empty_spot_delay)
                         continue
 
-                self.f2_fail_count = 0
+                # 3. КУСОК ВАЛИДАЦИИ: Моб в таргете появился (current_mob_hp > 0). Сверяем картинку
+                current_frame = self.tracker._current_frame
+                if current_frame is not None:
+                    # Если поймали раненого моба (ХП < 90) — это 100% преследователь, бьем без проверки
+                    if current_mob_hp >= 90:
+                        if not self.validate_mob_by_filters(current_frame):
+                            print("[Фильтр] Моб НЕ прошел проверку Белого/Черного списка. Пропускаем...")
+                            await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
+                            self.f2_fail_count += 1
+                            # Пауза, чтобы клиент игры успел очистить интерфейс от полосы ХП
+                            await asyncio.sleep(0.2)
+                            continue  # Мгновенно уходим на круг поиска новой цели
 
-                # ФАЗА ИНИЦИАЦИИ
-                print(f"[Таргет] Цель найдена. ХП моба: {current_hp}%. Начинаем атаку...")
-                max_seen_hp = current_hp
+                # 4. БОЕВОЙ БЛОК: Сюда заходим только если моб полностью одобрен фильтром
+                self.f2_fail_count = 0
+                print(f"[Таргет] Цель зафиксирована. Начинаем уничтожение. ХП моба: {current_mob_hp}%.")
                 start_combat_time = asyncio.get_event_loop().time()
                 
-                while current_hp == max_seen_hp:
-                    if self.is_paused: break
-                    if asyncio.get_event_loop().time() - start_combat_time >= 7.0:
-                        await self.arduino.send_button("Esc")
-                        break
-                    await self.arduino.send_button("1")
-                    await asyncio.sleep(random.uniform(0.1, 0.3))
-                    await self.arduino.send_button("4")
-                    await asyncio.sleep(random.uniform(0.2, 0.5))
-                    current_hp = self.tracker.get_current_value()
-
-                # ОСНОВНОЙ БОЙ
-                while current_hp > 0:
+                # Первый удар
+                current_mob_hp = await self._initiate_combat(current_mob_hp, start_combat_time)
+                
+                # --- УДЕРЖАНИЕ ТАРГЕТА ДО ПОЛНОЙ СМЕРТИ МОБА ---
+                while current_mob_hp > 0:
                     await asyncio.sleep(0.05)
                     if self.is_paused: continue
-                    current_hp = self.tracker.get_current_value()
                     
+                    # Контур селф-хила: прожимаем лечащий скилл, если нас просадили
+                    current_player_hp = self.player_hp_tracker.get_current_value()
+                    if current_player_hp <= 80:
+                        print(f"[Выживание] ХП упало до {current_player_hp}%. Юзаем ХП-скилл (ACTION_HP_SKILL)...")
+                        await self.execute_action(CombatAction.ACTION_HP_SKILL)
+                        await asyncio.sleep(0.25)
+                    
+                    current_mob_hp = self.tracker.get_current_value()
+
+                    # ЗАЩИТНЫЙ ТАЙМАУТ (Исправлена опечатка переменной start_combat_time)
                     if asyncio.get_event_loop().time() - start_combat_time >= self.combat_timeout:
-                        await self.arduino.send_button("Esc")
+                        print("[Бой] Превышен таймаут убийства моба. Сбрасываем таргет...")
+                        await self.execute_action(CombatAction.ACTION_CANCEL_TARGET)
                         break
 
-                    if 0 < current_hp <= 20:
-                        await self.arduino.send_button("4")
-                        while current_hp > 0:
+                    # Добивание оверхитом
+                    if 0 < current_mob_hp <= 20:
+                        print(f"[Добивание] ХП моба {current_mob_hp}%. Пробиваем ACTION_OVER_HIT!")
+                        await self.execute_action(CombatAction.ACTION_OVER_HIT)
+                        while self.tracker.get_current_value() > 0:
                             await asyncio.sleep(0.05)
-                            current_hp = self.tracker.get_current_value()
                         break
                     
-                    if current_hp > 20:
-                        await self.arduino.send_button("1")
+                    # Цикл атаки обычным скиллом
+                    if current_mob_hp > 20:
+                        await self.execute_action(CombatAction.ACTION_NUKE_1)
                         await asyncio.sleep(0.2)
 
+                print("[Бой] Моб успешно уничтожен. Очищаем состояние для следующего цикла.\n")
                 await asyncio.sleep(0.1)
+                
             except Exception as e:
-                print(f"[Ошибка] Критический сбой боевого цикла: {e}")
+                print(f"[Ошибка] Критический сбой боевого цикла дварфа: {e}")
                 await asyncio.sleep(1.0)
 
 
@@ -1114,7 +1270,67 @@ class SummonerCombat:
 
 
 ================================================================================
- FILE: vision\bot_manager.py (241 lines)
+ FILE: vision\action_definitions.py (53 lines)
+================================================================================
+
+from enum import Enum, auto
+
+class CombatAction(Enum):
+    # --- БАЗОВАЯ БОЕВАЯ ЛИНЕЙКА (1-13) ---
+    ACTION_HAND_ATTACK = auto()    # 1. Атака с руки
+    ACTION_NUKE_1 = auto()         # 2. Маг/Физ атака обычная 1
+    ACTION_NUKE_2 = auto()         # 3. Маг/Физ атака обычная 2
+    ACTION_HEAVY_NUKE_1 = auto()   # 4. Усиленная атака 1
+    ACTION_HEAVY_NUKE_2 = auto()   # 5. Усиленная атака 2
+    ACTION_HEAVY_NUKE_3 = auto()   # 6. Усиленная атака 3
+    ACTION_OVER_HIT = auto()       # 7. Овер-хит (добивание)
+    ACTION_DEBUFF_1 = auto()       # 8. Дебафф 1
+    ACTION_DEBUFF_2 = auto()       # 9. Дебафф 2
+    ACTION_DEBUFF_3 = auto()       # 10. Дебафф 3
+    ACTION_DEBUFF_4 = auto()       # 11. Дебафф 4
+    ACTION_DEBUFF_5 = auto()       # 12. Дебафф 5
+    ACTION_SIT_STAND = auto()      # 13. Сесть / Встать
+    ACTION_LONG_PULL = auto()      # Дальний маяк стягивания (кнопка 0)
+
+    # --- ЛИНЕЙКА ПОДДЕРЖКИ И ВЫЖИВАНИЯ (14-18) ---
+    ACTION_HP_SKILL = auto()       # 14. Селф-хил / Вампирик / Скилл-бафф дварфа
+    ACTION_HP_POTION = auto()      # 15. Обычные ХП-банки (без отката)
+    ACTION_CP_ELIXIR_SMALL = auto()# 16. Малый ЦП-эликсир (по 50 ЦП, откат 3 мин)
+    ACTION_CP_ELIXIR_BIG = auto()  # 17. Большой ЦП-эликсир (по 200/300 ЦП, откат 3 мин)
+    ACTION_HP_ELIXIR = auto()      # 18. ХП-эликсир (откат 3 мин)
+
+    # --- СИСТЕМНЫЕ КНОПКИ УПРАВЛЕНИЯ ТАРГЕТОМ (НОВЫЕ 19-20) ---
+    ACTION_NEXT_TARGET = auto()    # 19. Выбор следующей цели (штатный Next Target)
+    ACTION_CANCEL_TARGET = auto()  # 20. Сброс текущей цели (Esc)
+
+
+# Дефолтная базовая карта для Mage_dwarf, расширенная новыми экшенами
+DEFAULT_MAGE_DWARF_MAP = {
+    CombatAction.ACTION_HAND_ATTACK: "4",
+    CombatAction.ACTION_NUKE_1: "1",
+    CombatAction.ACTION_NUKE_2: "2",
+    CombatAction.ACTION_HEAVY_NUKE_1: "3",
+    CombatAction.ACTION_OVER_HIT: "7",
+    CombatAction.ACTION_DEBUFF_1: "8",
+    CombatAction.ACTION_SIT_STAND: "Num*",
+    CombatAction.ACTION_LONG_PULL: "0",
+    
+    # Резервируем кнопки для банок и селф-хила по умолчанию
+    CombatAction.ACTION_HP_SKILL: "9",
+    CombatAction.ACTION_HP_POTION: "-",
+    CombatAction.ACTION_CP_ELIXIR_SMALL: "Num1",
+    CombatAction.ACTION_CP_ELIXIR_BIG: "Num2",
+    CombatAction.ACTION_HP_ELIXIR: "Num3",
+
+    # Назначаем физические клавиши для системных действий по умолчанию
+    CombatAction.ACTION_NEXT_TARGET: "F2",
+    CombatAction.ACTION_CANCEL_TARGET: "Esc"
+}
+
+
+
+================================================================================
+ FILE: vision\bot_manager.py (285 lines)
 ================================================================================
 
 import asyncio
@@ -1129,12 +1345,16 @@ from vision.state_tracker import StateTracker
 from vision.target_validator import TargetValidator
 from vision.buff_system import BuffSystem  
 from arduino.arduino_controller_async import AsyncArduinoController 
+from vision.frame_bus import FrameBus
+
+
 
 try:
     from ctypes import windll
     windll.user32.SetProcessDPIAware()
 except Exception as e:
     print("DPI Awareness предупреждение:", e)
+
 
 class BotManager:
     def __init__(self, profile_name="PK_den4ika", combat_profile_name="summoner"):
@@ -1149,12 +1369,28 @@ class BotManager:
         self.hwnd_second = None
         
         self.arduino = AsyncArduinoController()
+        
+        # 1. Инициализируем нашу новую единую шину кадров
+        self.frame_bus = FrameBus(check_interval=0.05)
+        
+        # 2. Создаем трекеры шкал
         self.tracker = StateTracker(profile_name=self.profile_name, mode="target_hp")
+        self.player_hp_tracker = StateTracker(profile_name=self.profile_name, mode="player_hp")
+        self.player_mp_tracker = StateTracker(profile_name=self.profile_name, mode="player_mp")
+        
+        # 3. Регистрируем их в шине, чтобы они автоматом питались кадрами
+        self.frame_bus.register_tracker(self.tracker)
+        self.frame_bus.register_tracker(self.player_hp_tracker)
+        self.frame_bus.register_tracker(self.player_mp_tracker)
+        
         self.validator = TargetValidator(profile_name=self.profile_name)
         self.buff_system = BuffSystem(self.arduino)
         self.bot_combat = self._load_combat_profile()
         
+        # Ссылки на асинхронные задачи
         self.tracker_task = None
+        self.player_hp_task = None
+        self.player_mp_task = None
         self.combat_task = None
         self.is_switching_context = False
 
@@ -1302,12 +1538,18 @@ class BotManager:
         return True
 
     def toggle_pause(self):
+        # Меняем состояние паузы основного боевого цикла и систем
         self.bot_combat.is_paused = not self.bot_combat.is_paused
         self.tracker.is_paused = self.bot_combat.is_paused
+        self.player_hp_tracker.is_paused = self.bot_combat.is_paused
+        self.player_mp_tracker.is_paused = self.bot_combat.is_paused
         self.buff_system.is_paused = self.bot_combat.is_paused
         
+        # Синхронизируем паузу самой шины захвата кадров
+        self.frame_bus.is_paused = self.bot_combat.is_paused
+        
         if self.bot_combat.is_paused:
-            print(f"\n{'='*40}\n[ПАУЗА] Бот остановлен клавишей 'P'. Логи и баффы заморожены.\n{'='*40}\n")
+            print(f"\n{'='*40}\n[ПАУЗА] Бот остановлен клавишей 'P'. Логи и кадры заморожены.\n{'='*40}\n")
         else:
             print(f"\n{'='*40}\n[РАБОТА] Бот возобновил фарм клавишей 'P'.\n{'='*40}\n")
 
@@ -1330,9 +1572,7 @@ class BotManager:
         await asyncio.sleep(2)
         
         await self.switch_window("main")
-        
         self.buff_system.support_mode = self.support_mode
-
         await self.buff_system.buff_all_at_start()
 
         if self.bot_mode == "Dual-Box" and self.support_mode in self.buff_system.MODES_WITH_BUFF:
@@ -1341,14 +1581,33 @@ class BotManager:
         else:
             print("[Движок] Фоновые таймеры баффа отключены для данной роли саппорта.")
         
+        # 1. Запускаем центральную шину захвата кадров
+        self.frame_bus.start()
+        
+        # 2. Запускаем параллельные асинхронные циклы анализа шкал
         self.tracker_task = asyncio.create_task(self.tracker.track_loop())
+        self.player_hp_task = asyncio.create_task(self.player_hp_tracker.track_loop())
+        self.player_mp_task = asyncio.create_task(self.player_mp_tracker.track_loop())
+        
+        # 3. Запускаем боевую логику выбранного класса
         self.combat_task = asyncio.create_task(self.bot_combat.start_loop())
         
-        await asyncio.gather(self.tracker_task, self.combat_task)
+        await asyncio.gather(
+            self.tracker_task, 
+            self.player_hp_task, 
+            self.player_mp_task, 
+            self.combat_task
+        )
 
     def shutdown(self):
         print("\n[Выход] Закрытие ресурсов менеджера...")
+        # Останавливаем шину кадров
+        self.frame_bus.stop()
+        
+        # Гасим все корутины трекеров и боя
         if self.tracker_task: self.tracker_task.cancel()
+        if self.player_hp_task: self.player_hp_task.cancel()
+        if self.player_mp_task: self.player_mp_task.cancel()
         if self.combat_task: self.combat_task.cancel()
         
         self.buff_system.stop_buff_timers()
@@ -1361,8 +1620,9 @@ class BotManager:
 
 
 
+
 ================================================================================
- FILE: vision\buff_system.py (153 lines)
+ FILE: vision\buff_system.py (141 lines)
 ================================================================================
 
 import asyncio
@@ -1380,14 +1640,13 @@ class BuffSystem:
         self.bot_manager = None
         self.support_mode = 0  # Прилетает из BotManager (1-4)
         
-        # === МАССИВЫ ОПРЕДЕЛЕНЫ БЕЗ ХАРДКОДА ===
         self.MODES_WITH_BUFF = [1, 2]       # Режимы с ребаффом по таймеру (1-Овер, 2-ЕЕ)
         self.MODES_WITH_RECHARGE = [2, 3]   # Режимы с заливкой маны (2-ЕЕ, 3-ШЕ)
         
         # Монолитный флаг готовности к ребаффу (индекс 0)
         self.pending_buffs = {0: False}
         
-        # Расписание: 7 баффов подряд (F1-F7) раз в 19 минут (1140 секунд)
+        # Расписание: 8 баффов подряд (F1-F8) раз в 19 минут (1140 секунд)
         self.buff_schedule = {
             "keys": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"],
             "interval": 1140
@@ -1404,23 +1663,16 @@ class BuffSystem:
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
             if self.support_mode in self.MODES_WITH_BUFF:
                 print("\n[Баффер] Первичный запуск! Начинаю принудительный стартовый пати-ребафф ЕЕ...")
-                
-                # Имитируем, что время вышло, чтобы сработал метод check_and_run_pending_buffs
                 self.pending_buffs[0] = True
-                
-                # Насильно вызываем процедуру пати-ребаффа
                 await self.check_and_run_pending_buffs()
                 return
             
-        # === ЕСЛИ МЫ В СОЛО-РЕЖИМЕ (SINGLE-BOX) ===
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Single-Box":
             combat_profile = getattr(self.bot_manager, 'combat_profile_name', 'summoner')
-            # Если играет маг-дварф в соло — у него нет селф-баффов, полностью выключаем прожимы
             if "mage" in combat_profile.lower() or "dwarf" in combat_profile.lower():
                 print("[Баффер] Одиночный режим Мага-Дварфа. Селф-баффы отсутствуют. Пропускаем старт.")
                 return
 
-        # Для остальных соло-классов (типа овера/варка), у которых ЕСТЬ селф-баффы, оставляем прожим
         print("\n[Баффер] Запуск первичного селф-баффа на старте (Соло режим)...")
         for key in self.buff_schedule["keys"]:
             if self.is_paused: break
@@ -1428,16 +1680,20 @@ class BuffSystem:
         print("[Баффер] Первичный селф-бафф успешно завершён.\n")
 
     async def _buff_timer_worker(self, interval: float):
-        """Фоновый воркер таймера ребаффа."""
+        """Фоновый воркер таймера ребаффа с защитой от зависания на паузе."""
         while True:
             try:
                 await asyncio.sleep(interval)
                 
-                # Время пришло — выставляем флаг для индекса 0
+                # Время пришло — выставляем флаг
                 self.pending_buffs[0] = True
                 
-                # Ждем, пока боевой цикл гнома поймает этот флаг между мобами и сбросит в False
+                # Ждем сброса флага боевым циклом мейна, учитывая состояние паузы
                 while self.pending_buffs[0]:
+                    if self.is_paused:
+                        # Если бот на паузе, приостанавливаем ожидание, чтобы не блокировать поток
+                        await asyncio.sleep(2.0)
+                        continue
                     await asyncio.sleep(1.0)
             except asyncio.CancelledError:
                 break
@@ -1458,28 +1714,21 @@ class BuffSystem:
             print("\n[Баффер] Время баффа вышло! Запуск пати-ребаффа ЗАЛИВКИ (7 баффов)...")
             self.bot_manager.bot_combat.is_paused = True
             
-            # НАХОДЯСЬ НА ОКНЕ МЕЙНА, КИДАЕМ ИНВАЙТ САППОРТУ КНОПКОЙ F5
             print("[Мейн] Отправляем инвайт саппорту в группу (Кнопка 'F5')...")
             await self.bot_manager.arduino.send_button("F5")
             await asyncio.sleep(0.5)
             
-            # Переключаемся на окно саппорта
             if await self.bot_manager.switch_window("second"):
                 keys_list = self.buff_schedule["keys"]
                 for idx, key in enumerate(keys_list):
                     if self.is_paused or not self.bot_manager.bot_combat.is_paused:
                         break
                         
-                    # СТРАХОВОЧНЫЙ ФИКС: Если это САМАЯ ПОСЛЕДНЯЯ кнопка баффа (F7)
                     if idx == len(keys_list) - 1:
-                        # Даем ЕЕ 4.5 секунды, чтобы закончить каст, выдержать макросный /delay, 
-                        # чисто выйти из пати через /leave и прожать атаку/бег за гномом!
                         await self._send_button_with_delay(key, delay=4.5)
                     else:
-                        # Для обычных промежуточных баффов держим стандартный КД каста
                         await self._send_button_with_delay(key, delay=2.2)
                         
-                # Возвращаемся на дварфа
                 await self.bot_manager.switch_window("main")
                 
             self.pending_buffs[0] = False
@@ -1506,7 +1755,6 @@ class BuffSystem:
         return False
 
     def start_buff_timers(self):
-        """Запуск асинхронного воркера таймера."""
         if self.bot_manager and getattr(self.bot_manager, 'bot_mode', 'Single-Box') == "Dual-Box":
             if self.support_mode in self.MODES_WITH_BUFF:
                 print(f"[Баффер] Запуск фонового таймера ребаффа (Режим роли: {self.support_mode})")
@@ -1518,6 +1766,217 @@ class BuffSystem:
             for task in self.buff_tasks:
                 task.cancel()
             self.buff_tasks.clear()
+
+
+
+================================================================================
+ FILE: vision\combat_base.py (144 lines)
+================================================================================
+
+import os
+import json
+import cv2
+from vision.state_tracker import StateTracker
+from vision.action_definitions import CombatAction, DEFAULT_MAGE_DWARF_MAP
+
+class BaseCombat:
+    def __init__(self, tracker: StateTracker, validator, arduino, buff_system=None):
+        self.tracker = tracker
+        self.validator = validator
+        self.arduino = arduino
+        self.buff_system = buff_system
+        self.bot_manager = None
+        self.is_paused = False
+        
+        vision_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.config_path = os.path.join(vision_dir, "config.json")
+        
+        # Директории для графических шаблонов максимального ХП
+        self.white_list_dir = os.path.join(vision_dir, "vision", "white_list")
+        self.black_list_dir = os.path.join(vision_dir, "vision", "black_list")
+        
+        os.makedirs(self.white_list_dir, exist_ok=True)
+        os.makedirs(self.black_list_dir, exist_ok=True)
+        
+        # Загружаем графические файлы фильтров ХП один раз при старте
+        self.white_templates = self._load_filter_templates(self.white_list_dir)
+        self.black_templates = self._load_filter_templates(self.black_list_dir)
+        
+        self.action_map = self._load_action_mapping()
+        
+        self.player_hp_tracker = StateTracker(profile_name=self.tracker.profile_name, mode="player_hp")
+        self.player_mp_tracker = StateTracker(profile_name=self.tracker.profile_name, mode="player_mp")
+        self.player_hp_tracker.load_profile()
+        self.player_mp_tracker.load_profile()
+
+    def _load_filter_templates(self, dir_path: str) -> list:
+        """Загружает картинки макс ХП из папки в черно-белом формате."""
+        templates = []
+        try:
+            for file_name in os.listdir(dir_path):
+                if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    full_path = os.path.join(dir_path, file_name)
+                    img = cv2.imread(full_path, cv2.IMREAD_GRAYSCALE)
+                    if img is not None:
+                        templates.append((file_name, img))
+            if templates:
+                print(f"[Фильтр] Успешно кэшировано шаблонов ({len(templates)}) из: {os.path.basename(dir_path)}")
+            return templates
+        except Exception as e:
+            print(f"[Фильтр] Критическая ошибка чтения папки {dir_path}: {e}")
+            return []
+
+    def validate_mob_by_filters(self, frame_np) -> bool:
+        """Графическая валидация ХП моба с фиксом DPI во время фарма."""
+        if not self.white_templates and not self.black_templates:
+            return True
+
+        if not self.tracker.start_point or not self.tracker.end_point:
+            return True
+            
+        try:
+            x1, y1 = self.tracker.start_point
+            x2, y2 = self.tracker.end_point
+            
+            # Определяем масштаб на основе разницы кадра и логического экрана
+            import win32api
+            import win32con
+            screen_w = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+            screen_h = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+            
+            img_h, img_w, _ = frame_np.shape
+            dpi_factor_x = img_w / screen_w
+            dpi_factor_y = img_h / screen_h
+            
+            # Переводим координаты в физические
+            x1_phys = int(x1 * dpi_factor_x)
+            x2_phys = int(x2 * dpi_factor_x)
+            y1_phys = int(y1 * dpi_factor_y)
+            y2_phys = int(y2 * dpi_factor_y)
+            
+            w_full = abs(x2_phys - x1_phys)
+            
+            # Применяем точные сдвиги к физической матрице кадра
+            x = min(x1_phys, x2_phys) + int(w_full * 0.44)
+            y = min(y1_phys, y2_phys) - int(14 * dpi_factor_y)
+            w = int(w_full * 0.18)
+            h = int(15 * dpi_factor_y)
+            
+            # Вырезаем область максимального числового ХП целей
+            roi_gray = cv2.cvtColor(frame_np[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
+
+            # 1. Проверка по Черному Списку
+            for name, template in self.black_templates:
+                if roi_gray.shape[0] >= template.shape[0] and roi_gray.shape[1] >= template.shape[1]:
+                    res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, _ = cv2.minMaxLoc(res)
+                    if max_val >= 0.85:
+                        print(f"[Фильтр] Моб ИГНОРИРУЕТСЯ: Найдено совпадение в Black-листе ({name}, совпадение: {max_val:.2f})")
+                        return False
+
+            # 2. Проверка по Белому Списку
+            if self.white_templates:
+                for name, template in self.white_templates:
+                    if roi_gray.shape[0] >= template.shape[0] and roi_gray.shape[1] >= template.shape[1]:
+                        res = cv2.matchTemplate(roi_gray, template, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, _ = cv2.minMaxLoc(res)
+                        if max_val >= 0.85:
+                            print(f"[Фильтр] Моб ОДОБРЕН: Совпадение с White-листом ({name}, совпадение: {max_val:.2f})")
+                            return True
+                print("[Фильтр] Моб ИГНОРИРУЕТСЯ: Данное ХП отсутствует в White-листе.")
+                return False
+
+            return True
+        except Exception as e:
+            print(f"[Фильтр] Ошибка сопоставления шаблонов ХП: {e}")
+            return True
+
+
+    def _load_action_mapping(self) -> dict:
+        current_map = DEFAULT_MAGE_DWARF_MAP.copy()
+        if not os.path.exists(self.config_path):
+            return current_map
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            saved_actions = config.get("mage_dwarf_settings", {}).get("combat_actions", {})
+            for enum_action in CombatAction:
+                if enum_action.name in saved_actions:
+                    current_map[enum_action] = saved_actions[enum_action.name]
+            return current_map
+        except Exception:
+            return current_map
+
+    async def execute_action(self, action: CombatAction):
+        button = self.action_map.get(action)
+        if button:
+            await self.arduino.send_button(button)
+        else:
+            print(f"[Движок] Предупреждение: Действие {action.name} не привязано к кнопке!")
+
+    def set_trackers_sleep(self, is_sleep: bool):
+        self.player_hp_tracker.is_paused = is_sleep
+        self.player_mp_tracker.is_paused = is_sleep
+
+
+
+================================================================================
+ FILE: vision\frame_bus.py (53 lines)
+================================================================================
+
+import asyncio
+import numpy as np
+from vision.screen_capture import ScreenCapturer
+
+class FrameBus:
+    def __init__(self, check_interval: float = 0.05):
+        """
+        Единая шина кадров (Shared Frame Bus).
+        Исключает дублирование полноэкранных скриншотов в памяти.
+        """
+        self.capturer = ScreenCapturer()
+        self.check_interval = check_interval
+        self.trackers = []
+        self._capture_task = None
+        self.is_paused = False
+
+    def register_tracker(self, tracker):
+        """Регистрирует трекер для получения обновлений кадров."""
+        if tracker not in self.trackers:
+            self.trackers.append(tracker)
+
+    async def _capture_loop(self):
+        print("[Шина Кадров] Центральный воркер захвата экрана запущен.")
+        while True:
+            if self.is_paused:
+                await asyncio.sleep(0.2)
+                continue
+            try:
+                # Делаем один единственный полноэкранный снимок на всю систему
+                screenshot = self.capturer.take_screenshot()
+                frame_np = np.array(screenshot)
+                
+                # Раздаем один и тот же массив всем активным трекерам шкал
+                for tracker in self.trackers:
+                    if not tracker.is_paused:
+                        tracker.update_frame(frame_np)
+                        
+                await asyncio.sleep(self.check_interval)
+            except Exception as e:
+                print(f"[Ошибка Шины Кадров]: {e}")
+                await asyncio.sleep(1.0)
+
+    def start(self):
+        """Запускает асинхронный цикл захвата."""
+        if not self._capture_task or self._capture_task.done():
+            self._capture_task = asyncio.create_task(self._capture_loop())
+
+    def stop(self):
+        """Останавливает цикл захвата экрана."""
+        if self._capture_task:
+            self._capture_task.cancel()
+            self._capture_task = None
+        print("[Шина Кадров] Цикл захвата остановлен.")
 
 
 
@@ -1609,7 +2068,7 @@ class ScreenCapturer:
 
 
 ================================================================================
- FILE: vision\state_tracker.py (217 lines)
+ FILE: vision\state_tracker.py (213 lines)
 ================================================================================
 
 import os
@@ -1633,12 +2092,15 @@ class StateTracker:
         self.points = []
         self.base_colors = []
         
-        # Теперь точек 6, изначально все True (считаем полоску полной)
         self.points_status = [True] * 6
         self.change_counters = {i: 0 for i in range(6)}
         
         self.capturer = ScreenCapturer()
         self.is_paused = False
+        
+        # Поля для единой шины кадров
+        self._current_frame = None
+        self._frame_event = asyncio.Event()
 
     def load_profile(self) -> bool:
         if not os.path.exists(self.config_path):
@@ -1677,7 +2139,6 @@ class StateTracker:
         self.points_status = [True] * 6  
         self.change_counters = {i: 0 for i in range(6)}
         
-        # Строго 6 точек: 0%, 20%, 40%, 60%, 80%, 100%
         steps = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
         delta_x = x2 - x1
         delta_y = y2 - y1
@@ -1696,13 +2157,14 @@ class StateTracker:
     def is_color_changed(self, c1, c2, threshold=40):
         return np.linalg.norm(np.array(c1, dtype=int) - np.array(c2, dtype=int)) > threshold
 
+    def update_frame(self, frame_np):
+        """Метод для внешней поставки кадра от BotManager."""
+        self._current_frame = frame_np
+        self._frame_event.set()
+
     def get_current_value(self) -> int:
-        """Расчет процентов по 6 точкам контроля."""
-        # Если даже самая первая точка (0%) изменила цвет — значит шкала абсолютно пуста (0%)
         if not self.points_status[0]:
             return 0
-            
-        # Проверяем заполненность справа налево
         for i in range(5, -1, -1):
             if self.points_status[i]:
                 return i * 20
@@ -1738,15 +2200,14 @@ class StateTracker:
         print(f"[Калибровка] Данные для шкалы '{mode_type}' успешно записаны в '{self.profile_name}'.")
 
     async def track_loop(self):
-        # Валидные монолитные шкалы для 6 точек контроля
         valid_templates = [
-            [False, False, False, False, False, False], # 0%
-            [True,  False, False, False, False, False], # 20%
-            [True,  True,  False, False, False, False], # 40%
-            [True,  True,  True,  False, False, False], # 60%
-            [True,  True,  True,  True,  False, False], # 80%
-            [True,  True,  True,  True,  True,  False], # 100% (срез)
-            [True,  True,  True,  True,  True,  True]   # 100% (фулл)
+            [False, False, False, False, False, False],
+            [True,  False, False, False, False, False],
+            [True,  True,  False, False, False, False],
+            [True,  True,  True,  False, False, False],
+            [True,  True,  True,  True,  False, False],
+            [True,  True,  True,  True,  True,  False],
+            [True,  True,  True,  True,  True,  True]
         ]
         
         last_log_time = 0.0
@@ -1755,9 +2216,16 @@ class StateTracker:
             if self.is_paused:
                 await asyncio.sleep(0.2)
                 continue
+                
             try:
-                screenshot = self.capturer.take_screenshot()
-                frame_rgb = np.array(screenshot)
+                # Ожидаем появление нового кадра в шине данных
+                await self._frame_event.wait()
+                self._frame_event.clear()
+                
+                if self._current_frame is None:
+                    continue
+                    
+                frame_rgb = self._current_frame
                 h, w, _ = frame_rgb.shape
                 
                 temp_status = [True] * 6
@@ -1767,13 +2235,11 @@ class StateTracker:
                     raw_rgb = frame_rgb[y, x]
                     r, g, b = int(raw_rgb[0]), int(raw_rgb[1]), int(raw_rgb[2])
                     
-                    # ИНТЕЛЛЕКТУАЛЬНЫЙ АНАЛИЗ ЦВЕТА ШКАЛЫ
                     if self.mode == "player_mp":
                         if b > r + 30 and b > 70:
                             temp_status[i] = True
                         else:
                             temp_status[i] = False
-                            
                     elif self.mode == "player_hp" or self.mode == "target_hp":
                         if r > b + 30 and r > 70:
                             temp_status[i] = True
@@ -1783,11 +2249,9 @@ class StateTracker:
                         if self.is_color_changed([r, g, b], self.base_colors[i]):
                             temp_status[i] = False
 
-                # Проверка шаблона на "рваный мусор" (цифры критов и урона)
                 if temp_status in valid_templates:
                     status_changed = False
                     
-                    # Применяем фильтр consecutive_triggers для каждой из 6 точек
                     for i in range(6):
                         if temp_status[i] != self.points_status[i]:
                             self.change_counters[i] += 1
@@ -1797,14 +2261,11 @@ class StateTracker:
                         else:
                             self.change_counters[i] = 0
                     
-                    # === ВОЗВРАЩАЕМ ТАБЛИЧКУ ДЕБАГА В КОНСОЛЬ ===
                     curr_time = asyncio.get_event_loop().time()
                     if status_changed or (curr_time - last_log_time >= 1.5):
                         val = self.get_current_value()
-                        # Переводим True/False в наглядные символы + и -
                         visual_status = ["+" if s else "-" for s in self.points_status]
                         
-                        # Красивое имя для вывода в консоль
                         mode_labels = {
                             "target_hp": "МОБ HP  ",
                             "player_hp": "ДВАРФ HP",
@@ -1820,15 +2281,10 @@ class StateTracker:
                 print(f"[Ошибка Трекера {self.mode}]: {e}")
                 await asyncio.sleep(1.0)
 
-
-    def get_current_hp(self) -> int:
-        """Фолбэк-метод для совместимости со старыми боевыми профилями (Овер/Суммонер)."""
-        return self.get_current_value()
-
     def calibrate(self):
-        """Фолбэк-метод калибровки по умолчанию, если вызван старый метод инициализации."""
         print("[Калибровка] Запуск калибровки ХП моба по умолчанию...")
         self.calibrate_by_mode("target_hp")
+
 
 
 ================================================================================
