@@ -68,7 +68,7 @@ def main():
     combat_data = load_json_file(os.path.join("combat_profiles", "combat_profile.json"))
     
     profiles = calibrator_data.get("calibrated_profiles", {})
-    has_summon = combat_data.get("summon_management", {}).get("use_summon_logic", false) or combat_data.get("features_flags", {}).get("use_summon_logic", False)
+    has_summon = combat_data.get("summon_management", {}).get("use_summon_logic", False) or combat_data.get("features_flags", {}).get("use_summon_logic", False)
     
     if not profiles:
         print("[Ошибка] В calibrator.json нет откалиброванных профилей шкал.")
