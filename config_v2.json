@@ -1,0 +1,65 @@
+{
+    "modes": {},
+    "raw_zones": {
+        "player_status": [
+            1169,
+            1016,
+            472,
+            78
+        ],
+        "target_mob": [
+            1061,
+            879,
+            494,
+            138
+        ],
+        "summon_status": [
+            1665,
+            803,
+            425,
+            77
+        ]
+    },
+    "game_windows": {
+        "has_summon": true
+    },
+    "calibrated_profiles": {
+        "target_mob": {
+            "hp_start": [
+                1163,
+                1001
+            ],
+            "hp_end": [
+                1541,
+                1001
+            ]
+        },
+        "player_status": {
+            "cp_start": [
+                1244,
+                1046
+            ],
+            "cp_end": [
+                1591,
+                1046
+            ],
+            "hp_start": [
+                1244,
+                1065
+            ],
+            "hp_end": [
+                1604,
+                1065
+            ],
+            "mp_start": [
+                1244,
+                1084
+            ],
+            "mp_end": [
+                1615,
+                1084
+            ]
+        },
+        "summon_status": {}
+    }
+}
