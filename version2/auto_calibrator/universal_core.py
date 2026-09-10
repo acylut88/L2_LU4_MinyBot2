@@ -10,19 +10,24 @@ from auto_calibrator.defense_manager import DefenseManager
 from auto_calibrator.approach_control import ApproachControl
 from auto_calibrator.combat_rotation import CombatRotation
 
+from version2.arduino.arduino_controller_async import AsyncArduinoController
+from version2.vision.target_validator import TargetValidator
+
 class UniversalBotCore:
     def __init__(self, profile_name="combat_profile.json"):
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config_path = os.path.join(self.base_dir, "config.json")
         self.profile_path = os.path.join(self.base_dir, "combat_profiles", profile_name)
         
-        # Загружаем всё из единого конфига
         self.config_data = self._load_json(self.config_path)
-        self.calibrator_data = self.config_data # Перенаправляем ссылку для совместимости с шиной
         self.combat_profile = self._load_json(self.profile_path)
         
+        # Интеграция реального железа и компьютерного зрения
+        self.arduino = AsyncArduinoController(config_path=self.config_path)
+        self.validator = TargetValidator(profile_name="NB_Moi")
+        
         self.bus = ScreenBus(self.config_data, self.combat_profile)
-        self.defense = DefenseManager(self.combat_profile, self.bus)
+        self.defense = DefenseManager(self.combat_profile, self.bus, self.arduino)
         self.approach = ApproachControl(self) 
         self.rotation = CombatRotation(self)
         
@@ -39,12 +44,15 @@ class UniversalBotCore:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
+        print(f"[Критическая Ошибка] Файл не найден: {path}")
         sys.exit(1)
 
-    async def hardware_press_log(self, key, label):
+    async def hardware_press(self, key, label):
+        """Физическая отправка команды в плату Leonardo."""
         mp_val = self.bus.states['player_mp']
         hp_val = self.bus.states['mob_hp']
-        print(f"[БОЙ] Кнопка '{key}' -> {label} | MP: {mp_val} | Моб: {hp_val}")
+        print(f"[HARDWARE] Кнопка '{key}' -> {label} | MP: {mp_val} | Моб: {hp_val}")
+        await self.arduino.send_button(key)
 
     async def check_mana_and_rest(self, current_mob_hp):
         cfg = self.combat_profile.get("consumables_and_defense", {}).get("sit_rest_setup", {})
@@ -58,13 +66,13 @@ class UniversalBotCore:
             if self.approach.hp_weights.get(current_hp, 6) < self.approach.hp_weights.get(self.last_player_hp, 6):
                 self.is_sitting = False
                 self.last_player_hp = current_hp
-                await self.hardware_press_log(core["next_target"]["key"], "АНТИ-АГР ВСТАТЬ")
+                await self.hardware_press(core["next_target"]["key"], "АНТИ-АГР ВСТАТЬ")
                 return False 
 
             self.last_player_hp = current_hp
 
             if current_mp in ["80-100%", "100%"] and (time.time() - self.sit_time_start >= 5.0):
-                await self.hardware_press_log(cfg["sit_stand_key"], "ВСТАТЬ")
+                await self.hardware_press(cfg["sit_stand_key"], "ВСТАТЬ (Num*)")
                 self.is_sitting = False
                 await asyncio.sleep(1.2)
                 return False
@@ -77,13 +85,13 @@ class UniversalBotCore:
 
         if current_mp in ["0% (МЕРТВ)", "1-20%"]:
             if current_mob_hp != "0% (МЕРТВ)":
-                await self.hardware_press_log("Esc", "Сброс таргета перед посадкой")
+                await self.hardware_press("Esc", "Сброс таргета перед посадкой")
                 self.bus.states["mob_hp"] = "0% (МЕРТВ)"
                 await asyncio.sleep(0.4)
                 return True 
 
             if current_mob_hp == "0% (МЕРТВ)":
-                await self.hardware_press_log(cfg["sit_stand_key"], "СЕСТЬ")
+                await self.hardware_press(cfg["sit_stand_key"], "СЕСТЬ (Num*)")
                 self.is_sitting = True
                 self.sit_time_start = time.time() 
                 await asyncio.sleep(1.2)
@@ -116,14 +124,14 @@ class UniversalBotCore:
                 if flags.get("use_dwarf_logic") and dwarf.get("sweep_setup", {}).get("enabled") and not self.sweep_done:
                     sweep = dwarf["sweep_setup"]
                     for _ in range(sweep["clicks_count"]):
-                        await self.hardware_press_log(sweep["key"], "Свип")
+                        await self.hardware_press(sweep["key"], "Свип трупа")
                         await asyncio.sleep(sweep["delay_between_clicks_ms"] / 1000)
                     self.sweep_done = True
                     
                 if flags.get("loot_collection") and not self.loot_done:
                     loot = core["loot_key"]
                     for _ in range(loot["clicks_per_mob"]):
-                        await self.hardware_press_log(loot["key"], "Лут F1")
+                        await self.hardware_press(loot["key"], "Сбор лута F1")
                         await asyncio.sleep(loot["delay_ms"] / 1000)
                     self.loot_done = True
 
@@ -133,21 +141,21 @@ class UniversalBotCore:
                 f2_threshold = core.get("long_range_pull", {}).get("f2_fails_threshold", 5)
                 if self.f2_fail_count >= f2_threshold:
                     self.f2_fail_count = 0  
-                    await self.hardware_press_log(core["long_range_pull"]["key"], "Маяк 0")
+                    await self.hardware_press(core["long_range_pull"]["key"], "Дальний Маяк 0")
                     await asyncio.sleep(0.45)
                     if self.bus.states["mob_hp"] != "0% (МЕРТВ)":
-                        await self.hardware_press_log(core["normal_attack"]["key"], "Бег к маяку")
+                        await self.hardware_press(core["normal_attack"]["key"], "Бег к маяку")
                         await asyncio.sleep(1.2)
-                        await self.hardware_press_log("Esc", "Сброс маяка")
+                        await self.hardware_press("Esc", "Сброс маяка")
                         await asyncio.sleep(0.1)
                         for _ in range(3):
-                            await self.hardware_press_log(core["next_target"]["key"], "F2 на ходу")
+                            await self.hardware_press(core["next_target"]["key"], "F2 на ходу")
                             await asyncio.sleep(0.2)
                             if self.bus.states["mob_hp"] != "0% (МЕРТВ)": break
                     continue
 
                 if self.defense.check_cooldown("empty_spot_f2", 250):
-                    await self.hardware_press_log(core["next_target"]["key"], "Поиск F2")
+                    await self.hardware_press(core["next_target"]["key"], "Поиск Next Target F2")
                     await asyncio.sleep(0.15)
                     if self.bus.states["mob_hp"] == "0% (МЕРТВ)": self.f2_fail_count += 1
                 
@@ -166,7 +174,16 @@ class UniversalBotCore:
                 if self.approach.under_attack_on_search:
                     self.approach.under_attack_on_search = False
                 else:
-                    await self.hardware_press_log("Esc", "Пропуск раненого")
+                    await self.hardware_press("Esc", "Пропуск раненого моба")
+                    self.bus.states["mob_hp"] = "0% (МЕРТВ)"
+                    await asyncio.sleep(0.4)
+                    continue
+
+            # Умная проверка на босса (череп OpenCV) прямо в бою
+            if current_mob_hp in ["100%", "80-100%"] and flags.get("boss_protection"):
+                if await self.validator.is_boss_selected():
+                    print("[Защита] ВНИМАНИЕ! Обнаружен БОСС. Экстренный сброс!")
+                    await self.hardware_press("Esc", "Сброс босса")
                     self.bus.states["mob_hp"] = "0% (МЕРТВ)"
                     await asyncio.sleep(0.4)
                     continue
@@ -174,22 +191,25 @@ class UniversalBotCore:
             if await self.approach.handle_approach_logic(current_mob_hp):
                 continue
 
-            # ДЕЛЕГИРОВАНИЕ: Передаем выполнение скиллов нашему новому модулю
+            # Запуск боевой ротации кнопок Ардуино
             await self.rotation.execute_skills(current_mob_hp)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
 
     async def run(self):
         print("=" * 60)
-        print("   ЗАПУСК МОДУЛЬНОГО АСИНХРОННОГО ДВИЖКА (ОТЛАДКА)   ")
+        print("   ЗАПУСК АППАРАТНОГО ДВИЖКА (ПОЛНЫЙ ФАРМ С ARDUINO)   ")
         print("=" * 60)
+        
+        # Подключаем плату к COM-порту перед запуском потоков
+        if not await self.arduino.connect():
+            print("[Критическая Ошибка] Робот заблокирован: нет связи с Леонардо!")
+            return
+            
+        # Подгружаем шаблон черепа
+        self.validator.load_profile()
+        
         await asyncio.gather(
             self.bus.start_loop(),
             self.defense.start_loop(),
             self.combat_main_loop()
         )
-
-if __name__ == "__main__":
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    bot = UniversalBotCore()
-    try: asyncio.run(bot.run())
-    except KeyboardInterrupt: print("\n[Выход]")

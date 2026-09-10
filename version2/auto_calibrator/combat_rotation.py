@@ -6,7 +6,7 @@ class CombatRotation:
         self.core = core
 
     async def execute_skills(self, current_mob_hp):
-        """Прожимает умения, кулдауны и базовую атаку в бою."""
+        """Прожимает умения через Ардуино в зависимости от ХП моба."""
         profile = self.core.combat_profile
         rot = profile.get("combat_rotation", {})
         dwarf = profile.get("dwarf_spoiler_logic", {})
@@ -19,7 +19,7 @@ class CombatRotation:
             if spoil["trigger_condition"] == "on_start" and current_mob_hp == "100%":
                 if not self.core.spoil_attempted:
                     for _ in range(spoil["max_attempts"]):
-                        await self.core.hardware_press_log(spoil["key"], "Спойл")
+                        await self.core.hardware_press(spoil["key"], "Аппаратный СПОЙЛ")
                         await asyncio.sleep(spoil["delay_between_attempts_ms"] / 1000)
                     self.core.spoil_attempted = True
 
@@ -29,15 +29,15 @@ class CombatRotation:
                 if oh.get("enabled"):
                     act_id = f"oh_{oh['key']}"
                     if self.core.defense.check_cooldown(act_id, oh["cooldown_ms"]):
-                        await self.core.hardware_press_log(oh["key"], "💥 ОВЕРХИТ")
+                        await self.core.hardware_press(oh["key"], "💥 АППАРАТНЫЙ ОВЕРХИТ")
 
         # 3. Спам дополнительных атак класса по КД
         for atk in rot.get("additional_attacks", []):
             if atk.get("enabled"):
                 act_id = f"atk_{atk['key']}"
                 if self.core.defense.check_cooldown(act_id, atk["cooldown_ms"]):
-                    await self.core.hardware_press_log(atk["key"], "Доп. Атака")
+                    await self.core.hardware_press(atk["key"], "Боевое умение класса")
 
         # 4. Базовая атака / Нюк в паузах между КД скиллов
-        if self.core.defense.check_cooldown("normal_attack", 600):
-            await self.core.hardware_press_log(core_act["normal_attack"]["key"], "Удар")
+        if self.core.defense.check_cooldown("normal_attack", 650):
+            await self.core.hardware_press(core_act["normal_attack"]["key"], "Базовая Атака")

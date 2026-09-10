@@ -1930,24 +1930,126 @@ if __name__ == "__main__":
 
 
 ================================================================================
- FILE: version2\auto_calibrator\defense_manager.py (51 lines)
+ FILE: version2\auto_calibrator\approach_control.py (51 lines)
 ================================================================================
 
-# auto_calibrator/defense_manager.py
-"""
-полностью изолируем логику использования банок, эликсиров и кулдаунов
+# version2/auto_calibrator/approach_control.py
+import time
+import asyncio
 
-"""
+class ApproachControl:
+    def __init__(self, core):
+        self.core = core # Ссылка на главный оркестратор
+        self.approach_start_time = 0.0
+        self.is_approaching = False
+        self.under_attack_on_search = False
+        
+        self.hp_weights = {
+            "0% (МЕРТВ)": 0, "1-20%": 1, "20-40%": 2, 
+            "40-60%": 3, "60-80%": 4, "80-100%": 5, "100%": 6
+        }
+
+    def monitor_search_damage(self, current_player_hp):
+        """Следит за ударами со спины в фазе поиска."""
+        weight_now = self.hp_weights.get(current_player_hp, 6)
+        weight_last = self.hp_weights.get(self.core.last_player_hp, 6)
+        
+        if weight_now < weight_last:
+            print(f"[САМООБОРОНА] Входящий урон на поиске! HP упало с {self.core.last_player_hp} до {current_player_hp}.")
+            self.under_attack_on_search = True
+            
+        self.core.last_player_hp = current_player_hp
+
+    async def handle_approach_logic(self, current_mob_hp) -> bool:
+        """
+        Контролирует 7 секунд бега до моба (анти-затык).
+        Возвращает True, если цель была экстренно сброшена.
+        """
+        if current_mob_hp == "100%":
+            self.under_attack_on_search = False 
+            if not self.is_approaching:
+                print("[Сближение] Цель взята. Старт 7-секундного таймера анти-затыка...")
+                self.approach_start_time = time.time()
+                self.is_approaching = True
+            else:
+                if time.time() - self.approach_start_time >= 7.0:
+                    print("[Сближение] Затык в текстуре! Бежим больше 7 секунд без урона.")
+                    await self.core.hardware_press_log("Esc", "Сброс недосягаемого моба")
+                    self.core.bus.states["mob_hp"] = "0% (МЕРТВ)"
+                    self.is_approaching = False
+                    await asyncio.sleep(0.4)
+                    return True
+        else:
+            if self.is_approaching:
+                print("[Сближение] Урон пошел! Персонаж добежал. Таймер отключен.")
+                self.is_approaching = False
+        return False
 
 
+
+================================================================================
+ FILE: version2\auto_calibrator\combat_rotation.py (43 lines)
+================================================================================
+
+# version2/auto_calibrator/combat_rotation.py
+import asyncio
+
+class CombatRotation:
+    def __init__(self, core):
+        self.core = core
+
+    async def execute_skills(self, current_mob_hp):
+        """Прожимает умения через Ардуино в зависимости от ХП моба."""
+        profile = self.core.combat_profile
+        rot = profile.get("combat_rotation", {})
+        dwarf = profile.get("dwarf_spoiler_logic", {})
+        flags = profile.get("features_flags", {})
+        core_act = profile.get("core_actions", {})
+
+        # 1. Прожатие Спойла на старте боя (100% HP)
+        if flags.get("use_dwarf_logic") and dwarf.get("spoil_setup", {}).get("enabled"):
+            spoil = dwarf["spoil_setup"]
+            if spoil["trigger_condition"] == "on_start" and current_mob_hp == "100%":
+                if not self.core.spoil_attempted:
+                    for _ in range(spoil["max_attempts"]):
+                        await self.core.hardware_press(spoil["key"], "Аппаратный СПОЙЛ")
+                        await asyncio.sleep(spoil["delay_between_attempts_ms"] / 1000)
+                    self.core.spoil_attempted = True
+
+        # 2. Условие Оверхита (Добивание 1-20%)
+        if current_mob_hp == "1-20%":
+            for oh in rot.get("overhit_skills", []):
+                if oh.get("enabled"):
+                    act_id = f"oh_{oh['key']}"
+                    if self.core.defense.check_cooldown(act_id, oh["cooldown_ms"]):
+                        await self.core.hardware_press(oh["key"], "💥 АППАРАТНЫЙ ОВЕРХИТ")
+
+        # 3. Спам дополнительных атак класса по КД
+        for atk in rot.get("additional_attacks", []):
+            if atk.get("enabled"):
+                act_id = f"atk_{atk['key']}"
+                if self.core.defense.check_cooldown(act_id, atk["cooldown_ms"]):
+                    await self.core.hardware_press(atk["key"], "Боевое умение класса")
+
+        # 4. Базовая атака / Нюк в паузах между КД скиллов
+        if self.core.defense.check_cooldown("normal_attack", 650):
+            await self.core.hardware_press(core_act["normal_attack"]["key"], "Базовая Атака")
+
+
+
+================================================================================
+ FILE: version2\auto_calibrator\defense_manager.py (46 lines)
+================================================================================
+
+# version2/auto_calibrator/defense_manager.py
 import asyncio
 import time
 
-
 class DefenseManager:
-    def __init__(self, combat_profile, screen_bus):
+    def __init__(self, combat_profile, screen_bus, arduino_controller):
         self.combat_profile = combat_profile
         self.bus = screen_bus
+        self.arduino = arduino_controller # Физическая плата Leonardo
         self.is_paused = False
         self.cooldowns = {}
 
@@ -1959,11 +2061,12 @@ class DefenseManager:
             return True
         return False
 
-    async def hardware_press_log(self, key, label):
-        print(f"[ЗАЩИТА] Прожата кнопка '{key}' -> {label} | Мой HP: {self.bus.states['player_hp']}")
+    async def execute_defense_action(self, key, label):
+        print(f"[ЗАЩИТА] Физический прожим '{key}' -> {label} | Мой HP: {self.bus.states['player_hp']}")
+        await self.arduino.send_button(key) # Отправляем байт в COM-порт
 
     async def start_loop(self):
-        print("[Защита] Фоновый поток автоматического отхила и банок запущен.")
+        print("[Защита] Фоновый поток аппаратного отхила и банок запущен.")
         cfg = self.combat_profile.get("consumables_and_defense", {})
         
         while True:
@@ -1971,19 +2074,19 @@ class DefenseManager:
                 await asyncio.sleep(0.2)
                 continue
                 
-            # Проверка ХП Банок
+            # Проверка ХП Банок (Кулдаун изменен на 10 секунд)
             for pot in cfg.get("hp_potions", []):
                 if pot.get("enabled") and self.bus.states["player_hp"] in ["1-20%", "20-40%", "40-60%", "60-80%"]:
-                    if self.check_cooldown(f"hp_pot_{pot['key']}", pot["cooldown_ms"]):
-                        await self.hardware_press_log(pot["key"], "Использование HP Банки")
+                    if self.check_cooldown(f"hp_pot_{pot['key']}", 10000): # 10000 мс = 10 сек
+                        await self.execute_defense_action(pot["key"], "Использование HP Банки")
 
             # Проверка ЦП Банок
             for cp_pot in cfg.get("cp_potions", []):
                 if cp_pot.get("enabled") and self.bus.states["player_cp"] in ["1-20%", "20-40%", "40-60%"]:
                     if self.check_cooldown(f"cp_pot_{cp_pot['key']}", cp_pot["cooldown_ms"]):
-                        await self.hardware_press_log(cp_pot["key"], "Использование CP Банки")
+                        await self.execute_defense_action(cp_pot["key"], "Использование CP Банки")
                         
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05) # Высокая частота опроса для мгновенной реакции
 
 
 
@@ -2080,7 +2183,7 @@ class ScreenBus:
 
 
 ================================================================================
- FILE: version2\auto_calibrator\universal_core.py (214 lines)
+ FILE: version2\auto_calibrator\universal_core.py (215 lines)
 ================================================================================
 
 # version2/auto_calibrator/universal_core.py
@@ -2092,32 +2195,39 @@ import time
 
 from auto_calibrator.screen_bus import ScreenBus
 from auto_calibrator.defense_manager import DefenseManager
+from auto_calibrator.approach_control import ApproachControl
+from auto_calibrator.combat_rotation import CombatRotation
+
+from version2.arduino.arduino_controller_async import AsyncArduinoController
+from version2.vision.target_validator import TargetValidator
 
 class UniversalBotCore:
-    def __init__(self, calibrator_name="calibrator.json", profile_name="combat_profile.json"):
+    def __init__(self, profile_name="combat_profile.json"):
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.calibrator_path = os.path.join(self.base_dir, "auto_calibrator", calibrator_name)
+        self.config_path = os.path.join(self.base_dir, "config.json")
         self.profile_path = os.path.join(self.base_dir, "combat_profiles", profile_name)
         
-        self.calibrator_data = self._load_json(self.calibrator_path)
+        self.config_data = self._load_json(self.config_path)
         self.combat_profile = self._load_json(self.profile_path)
         
-        self.bus = ScreenBus(self.calibrator_data, self.combat_profile)
-        self.defense = DefenseManager(self.combat_profile, self.bus)
+        # Интеграция реального железа и компьютерного зрения
+        self.arduino = AsyncArduinoController(config_path=self.config_path)
+        self.validator = TargetValidator(profile_name="NB_Moi")
+        
+        self.bus = ScreenBus(self.config_data, self.combat_profile)
+        self.defense = DefenseManager(self.combat_profile, self.bus, self.arduino)
+        self.approach = ApproachControl(self) 
+        self.rotation = CombatRotation(self)
         
         self.is_paused = False
         self.spoil_attempted = False
         self.sweep_done = False
-        self.loot_done = False       # ФЛАГ-ФИКС: Контроль сбора лута с текущего трупа
-        
+        self.loot_done = False       
         self.is_sitting = False  
         self.sit_time_start = 0.0 
         self.last_player_hp = "100%" 
-        
-        self.hp_weights = {
-            "0% (МЕРТВ)": 0, "1-20%": 1, "20-40%": 2, 
-            "40-60%": 3, "60-80%": 4, "80-100%": 5, "100%": 6
-        }
+        self.f2_fail_count = 0          
+
     def _load_json(self, path):
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -2125,89 +2235,61 @@ class UniversalBotCore:
         print(f"[Критическая Ошибка] Файл не найден: {path}")
         sys.exit(1)
 
-    async def hardware_press_log(self, key, label):
-        """Единый логгер действий для режима отладки без Ардуины"""
-        print(f"[БОЙ] Нажата кнопка '{key}' -> {label} | МП: {self.bus.states['player_mp']} | ХП Моба: {self.bus.states['mob_hp']}")
-
     async def hardware_press(self, key, label):
-        """Алиас-заглушка, перенаправляющий вызовы на логгер отладки"""
-        await self.hardware_press_log(key, label)
+        """Физическая отправка команды в плату Leonardo."""
+        mp_val = self.bus.states['player_mp']
+        hp_val = self.bus.states['mob_hp']
+        print(f"[HARDWARE] Кнопка '{key}' -> {label} | MP: {mp_val} | Моб: {hp_val}")
+        await self.arduino.send_button(key)
 
     async def check_mana_and_rest(self, current_mob_hp):
-        """
-        Утилита контроля маны с защитой от нападения во время отдыха (Пункт 11 ТЗ + Фикс Агров).
-        """
         cfg = self.combat_profile.get("consumables_and_defense", {}).get("sit_rest_setup", {})
         core = self.combat_profile.get("core_actions", {})
-        if not cfg.get("enabled"):
-            return False
+        if not cfg.get("enabled"): return False
 
         current_mp = self.bus.states["player_mp"]
         current_hp = self.bus.states["player_hp"]
 
-        # ВЕСОВАЯ ПРОВЕРКА НА ПОЛУЧЕНИЕ УРОНА (ЕСЛИ МЫ СИДИМ)
         if self.is_sitting:
-            weight_now = self.hp_weights.get(current_hp, 6)
-            weight_last = self.hp_weights.get(self.last_player_hp, 6)
-            
-            if weight_now < weight_last:
-                print(f"[ТРЕВОГА] Нас атаковали во время отдыха! ХП упало с {self.last_player_hp} до {current_hp}.")
-                print("[Защита] Игра автоматически подняла персонажа. Отменяем режим отдыха, вступаем в бой!")
+            if self.approach.hp_weights.get(current_hp, 6) < self.approach.hp_weights.get(self.last_player_hp, 6):
                 self.is_sitting = False
                 self.last_player_hp = current_hp
-                
-                # Мгновенно срываемся в контратаку
-                await self.hardware_press_log(core["next_target"]["key"], "ВЫНУЖДЕННЫЙ КОНТР-ТАРГЕТ ПРИ АГРЕ")
+                await self.hardware_press(core["next_target"]["key"], "АНТИ-АГР ВСТАТЬ")
                 return False 
 
-            # Запоминаем текущее ХП для следующего кадра внутри отдыха
             self.last_player_hp = current_hp
 
-            # Встаем только если мана полная И мы отсидели минимум 5 секунд (защита от ложных кадров)
             if current_mp in ["80-100%", "100%"] and (time.time() - self.sit_time_start >= 5.0):
-                print("[Отдых] Мана полностью восстановлена. Встаем.")
-                await self.hardware_press_log(cfg["sit_stand_key"], "ВСТАТЬ (Завершение отдыха)")
+                await self.hardware_press(cfg["sit_stand_key"], "ВСТАТЬ (Num*)")
                 self.is_sitting = False
                 await asyncio.sleep(1.2)
                 return False
             else:
                 if self.defense.check_cooldown("sit_log", 2500):
-                    print(f"[Медитация] Восстановление... Мой HP: {current_hp} | MP: {current_mp}")
+                    print(f"[Медитация] Свободный реген... HP: {current_hp} | MP: {current_mp}")
                 return True
 
-        # Сохраняем ХП перед потенциальной посадкой
         self.last_player_hp = current_hp
 
-        # Если мы стоим и мана упала в ноль
         if current_mp in ["0% (МЕРТВ)", "1-20%"]:
-            # КРИТИЧЕСКИЙ СЛУЧАЙ: если в таргете живой моб (ХП = 100% или ранен)
             if current_mob_hp != "0% (МЕРТВ)":
-                print("[Отдых] Мана на нулю, но пойман таргет! Экстренный сброс цели через ESC.")
-                await self.hardware_press_log("Esc", "Сброс опасного таргета")
-                
-                # ЖЕСТКИЙ ФИКС: Принудительно очищаем состояние в памяти, обгоняя шину кадров
+                await self.hardware_press("Esc", "Сброс таргета перед посадкой")
                 self.bus.states["mob_hp"] = "0% (МЕРТВ)"
-                
-                # Даем игре 400 мс на закрытие интерфейса таргет-бара
                 await asyncio.sleep(0.4)
                 return True 
 
-            # Если цели гарантированно нет — безопасно садимся
             if current_mob_hp == "0% (МЕРТВ)":
-                print("[Отдых] Поляна чистая. Садимся на реген.")
-                await self.hardware_press_log(cfg["sit_stand_key"], "СЕСТЬ на отдых")
+                await self.hardware_press(cfg["sit_stand_key"], "СЕСТЬ (Num*)")
                 self.is_sitting = True
-                self.sit_time_start = time.time() # Запоминаем время посадки
+                self.sit_time_start = time.time() 
                 await asyncio.sleep(1.2)
                 return True
-
         return False
 
     async def combat_main_loop(self):
         print("[Бой] Главный конечный автомат боевого цикла запущен.")
         core = self.combat_profile.get("core_actions", {})
         dwarf = self.combat_profile.get("dwarf_spoiler_logic", {})
-        rotation = self.combat_profile.get("combat_rotation", {})
         flags = self.combat_profile.get("features_flags", {})
         
         while True:
@@ -2216,6 +2298,7 @@ class UniversalBotCore:
                 continue
                 
             current_mob_hp = self.bus.states["mob_hp"]
+            current_player_hp = self.bus.states["player_hp"]
 
             if await self.check_mana_and_rest(current_mob_hp):
                 await asyncio.sleep(0.1)
@@ -2223,80 +2306,101 @@ class UniversalBotCore:
             
             # --- ФАЗА ПОИСКА, СВИПА И СБОРА ЛУТА ---
             if current_mob_hp == "0% (МЕРТВ)":
-                # Свипаем только ОДИН раз за смерть моба
+                self.approach.is_approaching = False
+                self.approach.monitor_search_damage(current_player_hp)
+
                 if flags.get("use_dwarf_logic") and dwarf.get("sweep_setup", {}).get("enabled") and not self.sweep_done:
                     sweep = dwarf["sweep_setup"]
                     for _ in range(sweep["clicks_count"]):
-                        await self.hardware_press_log(sweep["key"], "Свип трупа гномом")
+                        await self.hardware_press(sweep["key"], "Свип трупа")
                         await asyncio.sleep(sweep["delay_between_clicks_ms"] / 1000)
                     self.sweep_done = True
                     
-                # Лутаем только ОДИН раз за смерть моба (Защита от Loot Spam Deadlock)
                 if flags.get("loot_collection") and not self.loot_done:
                     loot = core["loot_key"]
                     for _ in range(loot["clicks_per_mob"]):
-                        await self.hardware_press_log(loot["key"], "Сбор дропа (F1)")
+                        await self.hardware_press(loot["key"], "Сбор лута F1")
                         await asyncio.sleep(loot["delay_ms"] / 1000)
                     self.loot_done = True
 
                 self.spoil_attempted = False
 
-                # УМНЫЙ ПОИСК ЦЕЛИ: нажимаем F2 не бесконечно, а с кулдауном в 500 мс, если спот пуст
-                if self.defense.check_cooldown("empty_spot_f2", 500):
-                    await self.hardware_press_log(core["next_target"]["key"], "Поиск новой цели (F2)")
+                # Стягивание маяком
+                f2_threshold = core.get("long_range_pull", {}).get("f2_fails_threshold", 5)
+                if self.f2_fail_count >= f2_threshold:
+                    self.f2_fail_count = 0  
+                    await self.hardware_press(core["long_range_pull"]["key"], "Дальний Маяк 0")
+                    await asyncio.sleep(0.45)
+                    if self.bus.states["mob_hp"] != "0% (МЕРТВ)":
+                        await self.hardware_press(core["normal_attack"]["key"], "Бег к маяку")
+                        await asyncio.sleep(1.2)
+                        await self.hardware_press("Esc", "Сброс маяка")
+                        await asyncio.sleep(0.1)
+                        for _ in range(3):
+                            await self.hardware_press(core["next_target"]["key"], "F2 на ходу")
+                            await asyncio.sleep(0.2)
+                            if self.bus.states["mob_hp"] != "0% (МЕРТВ)": break
+                    continue
+
+                if self.defense.check_cooldown("empty_spot_f2", 250):
+                    await self.hardware_press(core["next_target"]["key"], "Поиск Next Target F2")
+                    await asyncio.sleep(0.15)
+                    if self.bus.states["mob_hp"] == "0% (МЕРТВ)": self.f2_fail_count += 1
                 
-                await asyncio.sleep(0.1) 
+                await asyncio.sleep(0.05) 
                 continue
 
             # --- ФАЗА АКТИВНОГО БОЯ ---
-            # Как только появился живой моб (ХП > 0), сбрасываем все триггеры смерти
             self.sweep_done = False 
             self.loot_done = False 
             self.is_sitting = False 
-            
-            # Прожатие Спойла на старте
-            if flags.get("use_dwarf_logic") and dwarf.get("spoil_setup", {}).get("enabled") and not self.spoil_attempted:
-                spoil = dwarf["spoil_setup"]
-                if spoil["trigger_condition"] == "on_start" and current_mob_hp == "100%":
-                    for _ in range(spoil["max_attempts"]):
-                        await self.hardware_press_log(spoil["key"], "Прожатие СПОЙЛА")
-                        await asyncio.sleep(spoil["delay_between_attempts_ms"] / 1000)
-                    self.spoil_attempted = True
+            self.f2_fail_count = 0  
+            self.last_player_hp = current_player_hp
 
-            # Условие Оверхита
-            if current_mob_hp == "1-20%":
-                for oh in rotation.get("overhit_skills", []):
-                    if oh.get("enabled") and self.defense.check_cooldown(f"oh_{oh['key']}", oh["cooldown_ms"]):
-                        await self.hardware_press_log(oh["key"], "💥 ОВЕР-ХИТ (Добивание)")
+            # Проверка вежливого фарма / самообороны
+            if current_mob_hp != "100%" and flags.get("skip_damaged_mobs"):
+                if self.approach.under_attack_on_search:
+                    self.approach.under_attack_on_search = False
+                else:
+                    await self.hardware_press("Esc", "Пропуск раненого моба")
+                    self.bus.states["mob_hp"] = "0% (МЕРТВ)"
+                    await asyncio.sleep(0.4)
+                    continue
 
-            # Спам дополнительных атак по кулдаунам
-            for atk in rotation.get("additional_attacks", []):
-                if atk.get("enabled") and self.defense.check_cooldown(f"atk_{atk['key']}", atk["cooldown_ms"]):
-                    await self.hardware_press_log(atk["key"], "Дополнительная атака класса")
+            # Умная проверка на босса (череп OpenCV) прямо в бою
+            if current_mob_hp in ["100%", "80-100%"] and flags.get("boss_protection"):
+                if await self.validator.is_boss_selected():
+                    print("[Защита] ВНИМАНИЕ! Обнаружен БОСС. Экстренный сброс!")
+                    await self.hardware_press("Esc", "Сброс босса")
+                    self.bus.states["mob_hp"] = "0% (МЕРТВ)"
+                    await asyncio.sleep(0.4)
+                    continue
 
-            # Обычный нюк / удар в паузах
-            if self.defense.check_cooldown("normal_attack", 600):
-                await self.hardware_press_log(core["normal_attack"]["key"], "Базовая атака / Скилл")
-                
-            await asyncio.sleep(0.1)
+            if await self.approach.handle_approach_logic(current_mob_hp):
+                continue
+
+            # Запуск боевой ротации кнопок Ардуино
+            await self.rotation.execute_skills(current_mob_hp)
+            await asyncio.sleep(0.05)
+
     async def run(self):
         print("=" * 60)
-        print("   ЗАПУСК МОДУЛЬНОГО АСИНХРОННОГО ДВИЖКА (ОТЛАДКА)   ")
+        print("   ЗАПУСК АППАРАТНОГО ДВИЖКА (ПОЛНЫЙ ФАРМ С ARDUINO)   ")
         print("=" * 60)
+        
+        # Подключаем плату к COM-порту перед запуском потоков
+        if not await self.arduino.connect():
+            print("[Критическая Ошибка] Робот заблокирован: нет связи с Леонардо!")
+            return
+            
+        # Подгружаем шаблон черепа
+        self.validator.load_profile()
         
         await asyncio.gather(
             self.bus.start_loop(),
             self.defense.start_loop(),
             self.combat_main_loop()
         )
-
-if __name__ == "__main__":
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    bot = UniversalBotCore()
-    try:
-        asyncio.run(bot.run())
-    except KeyboardInterrupt:
-        print("\n[Движок] Модульный движок успешно остановлен.")
 
 
 

@@ -1,18 +1,12 @@
-# auto_calibrator/defense_manager.py
-"""
-полностью изолируем логику использования банок, эликсиров и кулдаунов
-
-"""
-
-
+# version2/auto_calibrator/defense_manager.py
 import asyncio
 import time
 
-
 class DefenseManager:
-    def __init__(self, combat_profile, screen_bus):
+    def __init__(self, combat_profile, screen_bus, arduino_controller):
         self.combat_profile = combat_profile
         self.bus = screen_bus
+        self.arduino = arduino_controller # Физическая плата Leonardo
         self.is_paused = False
         self.cooldowns = {}
 
@@ -24,11 +18,12 @@ class DefenseManager:
             return True
         return False
 
-    async def hardware_press_log(self, key, label):
-        print(f"[ЗАЩИТА] Прожата кнопка '{key}' -> {label} | Мой HP: {self.bus.states['player_hp']}")
+    async def execute_defense_action(self, key, label):
+        print(f"[ЗАЩИТА] Физический прожим '{key}' -> {label} | Мой HP: {self.bus.states['player_hp']}")
+        await self.arduino.send_button(key) # Отправляем байт в COM-порт
 
     async def start_loop(self):
-        print("[Защита] Фоновый поток автоматического отхила и банок запущен.")
+        print("[Защита] Фоновый поток аппаратного отхила и банок запущен.")
         cfg = self.combat_profile.get("consumables_and_defense", {})
         
         while True:
@@ -36,16 +31,16 @@ class DefenseManager:
                 await asyncio.sleep(0.2)
                 continue
                 
-            # Проверка ХП Банок
+            # Проверка ХП Банок (Кулдаун изменен на 10 секунд)
             for pot in cfg.get("hp_potions", []):
                 if pot.get("enabled") and self.bus.states["player_hp"] in ["1-20%", "20-40%", "40-60%", "60-80%"]:
-                    if self.check_cooldown(f"hp_pot_{pot['key']}", pot["cooldown_ms"]):
-                        await self.hardware_press_log(pot["key"], "Использование HP Банки")
+                    if self.check_cooldown(f"hp_pot_{pot['key']}", 10000): # 10000 мс = 10 сек
+                        await self.execute_defense_action(pot["key"], "Использование HP Банки")
 
             # Проверка ЦП Банок
             for cp_pot in cfg.get("cp_potions", []):
                 if cp_pot.get("enabled") and self.bus.states["player_cp"] in ["1-20%", "20-40%", "40-60%"]:
                     if self.check_cooldown(f"cp_pot_{cp_pot['key']}", cp_pot["cooldown_ms"]):
-                        await self.hardware_press_log(cp_pot["key"], "Использование CP Банки")
+                        await self.execute_defense_action(cp_pot["key"], "Использование CP Банки")
                         
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05) # Высокая частота опроса для мгновенной реакции
