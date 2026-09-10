@@ -11,18 +11,20 @@ from auto_calibrator.approach_control import ApproachControl
 from auto_calibrator.combat_rotation import CombatRotation
 
 class UniversalBotCore:
-    def __init__(self, calibrator_name="calibrator.json", profile_name="combat_profile.json"):
+    def __init__(self, profile_name="combat_profile.json"):
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.calibrator_path = os.path.join(self.base_dir, "auto_calibrator", calibrator_name)
+        self.config_path = os.path.join(self.base_dir, "config.json")
         self.profile_path = os.path.join(self.base_dir, "combat_profiles", profile_name)
         
-        self.calibrator_data = self._load_json(self.calibrator_path)
+        # Загружаем всё из единого конфига
+        self.config_data = self._load_json(self.config_path)
+        self.calibrator_data = self.config_data # Перенаправляем ссылку для совместимости с шиной
         self.combat_profile = self._load_json(self.profile_path)
         
-        self.bus = ScreenBus(self.calibrator_data, self.combat_profile)
+        self.bus = ScreenBus(self.config_data, self.combat_profile)
         self.defense = DefenseManager(self.combat_profile, self.bus)
         self.approach = ApproachControl(self) 
-        self.rotation = CombatRotation(self) # Подключаем боевую ротацию
+        self.rotation = CombatRotation(self)
         
         self.is_paused = False
         self.spoil_attempted = False
