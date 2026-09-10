@@ -4,141 +4,208 @@
 Плата готова (входящий буфер пуст, линии DTR/RTS активны).
 
 ============================================================
-   ТЕСТ АППАРАТНОЙ ПОСАДКИ ПО ЕДИНОМУ СИНХРОННОМУ КОНФИГУ   
+   ТЕСТ АППАРАТНОЙ ЗАЩИТЫ БАНКАМИ HP (Кнопка '11')   
 ============================================================
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 60-80%     | Сидим: False
-[Live] Мана в игре: 60-80%     | Сидим: False
-[Live] Мана в игре: 40-60%     | Сидим: False
-[Live] Мана в игре: 40-60%     | Сидим: False
-[Live] Мана в игре: 20-40%     | Сидим: False
-[Live] Мана в игре: 20-40%     | Сидим: False
-[Live] Мана в игре: 20-40%     | Сидим: False
-[Live] Мана в игре: 20-40%     | Сидим: False
-[Live] Мана в игре: 1-20%      | Сидим: False
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 60-80%    
 
-[Триггер] МП упало! Отправка аппаратного сигнала СЕСТЬ (Num*)...
-Отправлена команда для кнопки: Num* (символ: 'z')
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 1-20%      | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 20-40%     | Сидим: True
-[Live] Мана в игре: 40-60%     | Сидим: True
-[Live] Мана в игре: 60-80%     | Сидим: True
-[Live] Мана в игре: 60-80%     | Сидим: True
-[Live] Мана в игре: 80-100%    | Сидим: True
+[ЗАЩИТА!] Обнаружен прог ХП (60-80%). Прожимаем банку через Ардуино...
+Отправлена команда для кнопки: - (символ: 'm')
+[Кулдаун] Запуск таймера защиты на 15.0 секунд.
 
-[Триггер] МП восстановилось! Отправка аппаратного сигнала ВСТАТЬ (Num*)...
-Отправлена команда для кнопки: Num* (символ: 'z')
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 80-100%    | Сидим: False
-[Live] Мана в игре: 60-80%     | Сидим: False
-[Live] Мана в игре: 40-60%     | Сидим: False
-[Live] Мана в игре: 1-20%      | Сидим: False
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 80-100%   
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 60-80%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
 
-[Триггер] МП упало! Отправка аппаратного сигнала СЕСТЬ (Num*)...
-Отправлена команда для кнопки: Num* (символ: 'z')
-[Live] Мана в игре: 80-100%    | Сидим: True
-[Live] Мана в игре: 80-100%    | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
-[Live] Мана в игре: 100%       | Сидим: True
+[ЗАЩИТА!] Обнаружен прог ХП (20-40%). Прожимаем банку через Ардуино...
+Отправлена команда для кнопки: - (символ: 'm')
+[Кулдаун] Запуск таймера защиты на 15.0 секунд.
 
-[Триггер] МП восстановилось! Отправка аппаратного сигнала ВСТАТЬ (Num*)...
-Отправлена команда для кнопки: Num* (символ: 'z')
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
-[Live] Мана в игре: 100%       | Сидим: False
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 20-40%    
+[Defense Live] Моё ХП в игре: 40-60%    
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
+[Defense Live] Моё ХП в игре: 100%      
 Подключение закрыто.
 Traceback (most recent call last):
   File "C:\Python314\Lib\asyncio\runners.py", line 127, in run
@@ -147,8 +214,8 @@ Traceback (most recent call last):
   File "C:\Python314\Lib\asyncio\base_events.py", line 719, in run_until_complete
     return future.result()
            ~~~~~~~~~~~~~^^
-  File "F:\__LESSONS_Python\projects\L2_Lu4_Miny_Fighter_bot__3\tests\test_sit_stand_live.py", line 93, in main
-    await asyncio.sleep(0.15)
+  File "f:\__LESSONS_Python\projects\L2_Lu4_Miny_Fighter_bot__3\tests\test_defense_live.py", line 91, in main
+    await asyncio.sleep(0.1)
   File "C:\Python314\Lib\asyncio\tasks.py", line 702, in sleep
     return await future
            ^^^^^^^^^^^^
@@ -157,7 +224,7 @@ asyncio.exceptions.CancelledError
 During handling of the above exception, another exception occurred:
 
 Traceback (most recent call last):
-  File "F:\__LESSONS_Python\projects\L2_Lu4_Miny_Fighter_bot__3\tests\test_sit_stand_live.py", line 101, in <module>
+  File "f:\__LESSONS_Python\projects\L2_Lu4_Miny_Fighter_bot__3\tests\test_defense_live.py", line 99, in <module>
     asyncio.run(main())
     ~~~~~~~~~~~^^^^^^^^
   File "C:\Python314\Lib\asyncio\runners.py", line 204, in run
