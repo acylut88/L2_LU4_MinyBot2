@@ -26,6 +26,8 @@ class UniversalBotCore:
         
         # Состояние посадки персонажа
         self.is_sitting = False  
+        self.sit_time_start = 0.0 # Время начала медитации
+
         # Хранилище ХП на прошлом кадре для отслеживания урона при отдыхе
         self.last_player_hp = "100%" 
         
@@ -75,16 +77,16 @@ class UniversalBotCore:
             # Запоминаем текущее ХП для следующего кадра внутри отдыха
             self.last_player_hp = current_hp
 
-            # Стандартный выход из отдыха по заполнению маны
-            if current_mp in ["80-100%", "100%"]:
+            # Встаем только если мана полная И мы отсидели минимум 5 секунд (защита от ложных кадров)
+            if current_mp in ["80-100%", "100%"] and (time.time() - self.sit_time_start >= 5.0):
                 print("[Отдых] Мана полностью восстановлена. Встаем.")
-                await self.hardware_press_log(cfg["sit_stand_key"], "ВСТАТЬ (Завершение отдыха)")
+                await self.hardware_press(cfg["sit_stand_key"], "ВСТАТЬ (Команда Num*)")
                 self.is_sitting = False
                 await asyncio.sleep(1.2)
                 return False
             else:
-                if self.defense.check_cooldown("sit_log", 2000):
-                    print(f"[Отдых] Реген маны в безопасности... Мой HP: {current_hp} | MP: {current_mp}")
+                if self.defense.check_cooldown("sit_log", 2500):
+                    print(f"[Медитация] Восстановление... Мой HP: {current_hp} | MP: {current_mp}")
                 return True
 
         # Сохраняем ХП перед потенциальной посадкой
@@ -100,8 +102,9 @@ class UniversalBotCore:
 
             if current_mob_hp == "0% (МЕРТВ)":
                 print("[Отдых] Поляна чистая. Садимся на реген.")
-                await self.hardware_press_log(cfg["sit_stand_key"], "СЕСТЬ на отдых")
+                await self.hardware_press(cfg["sit_stand_key"], "СЕСТЬ на отдых")
                 self.is_sitting = True
+                self.sit_time_start = time.time() # Запоминаем время посадки
                 await asyncio.sleep(1.2)
                 return True
 

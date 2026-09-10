@@ -1,0 +1,120 @@
+{
+    "profile_meta": {
+        "name": "Universal_Combat_Profile",
+        "description": "Декларативный профиль боя со всеми кнопками, кулдаунами и логикой гнома-спойлера"
+    },
+    "features_flags": {
+        "use_dual_box": false,
+        "skip_damaged_mobs": true,
+        "boss_protection": true,
+        "loot_collection": true,
+        "use_summon_logic": false,
+        "use_dwarf_logic": true
+    },
+    "core_actions": {
+        "normal_attack": {"key": "1", "enabled": true, "comment": "Атака с руки (Пункт 1)"},
+        "next_target": {"key": "F2", "enabled": true},
+        "long_range_pull": {"key": "0", "f2_fails_threshold": 5, "comment": "Кнопка макроса дальнего поиска"},
+        "loot_key": {"key": "F1", "clicks_per_mob": 4, "delay_ms": 50, "comment": "Сбор лута (Пункты 17-18)"}
+    },
+    "dwarf_spoiler_logic": {
+        "spoil_setup": {
+            "key": "2",
+            "trigger_condition": "on_start",
+            "trigger_at_mob_hp": "100%",
+            "max_attempts": 2,
+            "delay_between_attempts_ms": 500,
+            "enabled": true,
+            "comment": "Спойл живого моба (on_start или при достижении определенного ХП, например 60-80%)"
+        },
+        "sweep_setup": {
+            "key": "3",
+            "trigger_on_mob_dead": true,
+            "clicks_count": 3,
+            "delay_between_clicks_ms": 150,
+            "enabled": true,
+            "comment": "Свип трупа строго при ХП = 0% несколько раз подряд"
+        }
+    },
+    "combat_rotation": {
+        "additional_attacks": [
+            {"key": "4", "cooldown_ms": 1000, "enabled": true, "comment": "Атака 2 (Пункт 2)"},
+            {"key": "5", "cooldown_ms": 2000, "enabled": true, "comment": "Атака 3 (Пункт 3)"}
+        ],
+        "debuffs": [
+            {"key": "6", "cooldown_ms": 7000, "enabled": true, "comment": "Дебафф 1 (Пункт 4)"}
+        ],
+        "vampiric_heal_skill": {
+            "key": "9",
+            "trigger_my_hp_under": 80,
+            "only_if_mob_hp_above": "20-40%",
+            "cooldown_ms": 7000,
+            "enabled": false,
+            "comment": "Вампирик на живом мобе (Пункт 9)"
+        },
+        "overhit_skills": [
+            {"key": "24", "trigger_on_mob_hp": "1-20%", "cooldown_ms": 8000, "enabled": false, "comment": "Овер-хит (Пункт 24)"}
+        ],
+        "corpse_absorption_skill": {
+            "key": "10",
+            "trigger_on_mob_dead": true,
+            "trigger_my_hp_under": 60,
+            "max_attempts": 1,
+            "cooldown_ms": 3000,
+            "enabled": false,
+            "comment": "Поглощение трупа строго 1 раз при ХП < 60% (Пункт 10)"
+        }
+    },
+    "consumables_and_defense": {
+        "hp_potions": [
+            {"key": "11", "trigger_my_hp_under": 70, "cooldown_ms": 15000, "enabled": true, "comment": "ХП Банка 1 (Пункт 14)"},
+            {"key": "12", "trigger_my_hp_under": 50, "cooldown_ms": 15000, "enabled": true, "comment": "ХП Банка 2 (Пункт 14)"}
+        ],
+        "elixirs": {
+            "hp_elixir": {"key": "15", "trigger_my_hp_under": 20, "cooldown_ms": 180000, "enabled": true, "comment": "Элик ХП (Пункт 15)"},
+            "mp_elixir": {"key": "16", "trigger_my_mp_under": 20, "cooldown_ms": 180000, "enabled": true, "comment": "Элик МП (Пункт 16)"}
+        },
+        "cp_potions": [
+            {"key": "17", "trigger_my_cp_under": 80, "cooldown_ms": 3000, "enabled": true, "comment": "Малая ЦП (Пункт 17)"},
+            {"key": "18", "trigger_my_cp_under": 40, "cooldown_ms": 3000, "enabled": true, "comment": "Большая ЦП (Пункт 18)"}
+        ],
+        "over_buffs": {
+            "cp_buff_party": {"key": "19", "trigger_my_cp_under": 70, "cooldown_ms": 5000, "enabled": false, "comment": "Общий ЦП бафф Овера (Пункт 19)"},
+            "cp_buff_solo": {"key": "20", "trigger_my_cp_under": 40, "cooldown_ms": 4000, "enabled": false, "comment": "Соло ЦП бафф Овера (Пункт 20)"}
+        },
+        "sit_rest_setup": {
+            "enabled": true,
+            "trigger_my_mp_under": 20,
+            "stand_up_at_mp": 80,
+            "sit_stand_key": "Num*",
+            "comment": "Регенерация маны сидя на жопе в соло режиме (Пункт 11)"
+        }
+    },
+    "summon_management": {
+        "normal_attack": {"key": "27", "enabled": false, "comment": "Обычная атака слуги (Пункт 27)"},
+        "strong_attack": {"key": "28", "cooldown_ms": 6000, "enabled": false, "comment": "Усиленная атака слуги (Пункт 28)"},
+        "debuff": {"key": "29", "cooldown_ms": 10000, "enabled": false, "comment": "Дебафф от слуги (Пункт 29)"},
+        "stop_return": {"key": "30", "enabled": false, "comment": "Слуга стоп (Пункт 30)"},
+        "heal_summon": {"key": "25", "trigger_summon_hp_under": 50, "cooldown_ms": 4000, "enabled": false, "comment": "Хил слуги (Пункт 25)"},
+        "recharge_summon_mp": {"key": "26", "trigger_summon_mp_under": 30, "cooldown_ms": 5000, "enabled": false, "comment": "МП слуге (Пункт 26)"}
+    },
+    "buffs_pool": [
+        {
+            "key": "F5",
+            "interval_sec": 1200,
+            "is_party_buff": true,
+            "requires_invite_logic": true,
+            "invite_key": "F5",
+            "enabled": false,
+            "comment": "Пати бафф по КД с логикой инвайта/выхода из группы (Пункт 31)"
+        },
+        {
+            "key": "F6",
+            "interval_sec": 300,
+            "is_party_buff": false,
+            "requires_invite_logic": false,
+            "enabled": true,
+            "comment": "Обычный селф-бафф по КД (Пункт 32)"
+        }
+    ]
+}
