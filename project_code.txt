@@ -34,6 +34,113 @@ if __name__ == "__main__":
 
 
 ================================================================================
+ FILE: migrate_to_v2.py.py (100 lines)
+================================================================================
+
+# migrate_to_v2.py
+import os
+import shutil
+
+def create_project_v2():
+    # Находим корень текущего проекта
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    v2_dir = os.path.join(root_dir, "version2")
+    
+    print("=" * 60)
+    # Очищаем старую папку version2, если она существовала, для чистой сборки
+    if os.path.exists(v2_dir):
+        print("[Скрипт] Обнаружена старая папка version2. Полная очистка...")
+        shutil.rmtree(v2_dir)
+        
+    # 1. Описываем структуру каталогов для новой версии
+    folders_to_create = [
+        "version2",
+        "version2/arduino",
+        "version2/vision",
+        "version2/auto_calibrator",
+        "version2/auto_calibrator/debug_images",
+        "version2/combat_profiles"
+    ]
+    
+    print("[Скрипт] Создание новой чистой структуры папок...")
+    for folder in folders_to_create:
+        os.makedirs(os.path.join(root_dir, folder), exist_ok=True)
+        
+    # 2. Карта копирования: (исходный файл относительно корня -> куда скопировать в version2)
+    files_to_copy = [
+        # Конфиги и системные зависимости из старой версии
+        ("config.json", "version2/config.json"),
+        ("presets/skull_boss.png", "version2/vision/skull.png"), # Переносим шаблон в папку vision
+        
+        # Модули Ардуино и Компьютерного Зрения
+        ("arduino/arduino_controller_async.py", "version2/arduino/arduino_controller_async.py"),
+        ("vision/target_validator.py", "version2/vision/target_validator.py"),
+        ("vision/screen_capture.py", "version2/vision/screen_capture.py"),
+        
+        # Наши новые модули универсального ядра
+        ("auto_calibrator/screen_bus.py", "version2/auto_calibrator/screen_bus.py"),
+        ("auto_calibrator/defense_manager.py", "version2/auto_calibrator/defense_manager.py"),
+        ("auto_calibrator/universal_core.py", "version2/auto_calibrator/universal_core.py"),
+    ]
+    
+    # Инициализируем пустые файлы-маркеры инициализации пакетов Python
+    with open(os.path.join(v2_dir, "arduino", "__init__.py"), "w") as f: pass
+    with open(os.path.join(v2_dir, "vision", "__init__.py"), "w") as f: pass
+    with open(os.path.join(v2_dir, "auto_calibrator", "__init__.py"), "w") as f: pass
+    with open(os.path.join(v2_dir, "combat_profiles", "__init__.py"), "w") as f: pass
+
+    # Копируем файлы по карте
+    print("[Скрипт] Перенос файлов ядра и системных конфигураций...")
+    for src_rel, dest_rel in files_to_copy:
+        src_path = os.path.join(root_dir, src_rel)
+        dest_path = os.path.join(root_dir, dest_rel)
+        
+        if os.path.exists(src_path):
+            shutil.copy2(src_path, dest_path)
+            print(f"  -> Успешно перенесен: {src_rel}")
+        else:
+            print(f"  -> [Пропуск] Исходный файл не найден: {src_rel}")
+
+    # 3. Интегрируем калибровочные данные из config.json в calibrator.json
+    print("[Скрипт] Извлечение и конвертация калибровочных данных...")
+    config_src = os.path.join(root_dir, "config.json")
+    calibrator_dest = os.path.join(v2_dir, "calibrator.json")
+    
+    if os.path.exists(config_src):
+        try:
+            with open(config_src, "r", encoding="utf-8") as f:
+                old_cfg = json.load(f)
+            
+            # Строим чистый формат калибратора, вытаскивая координаты из старого конфига
+            calibrator_structure = {
+                "calibrated_profiles": {
+                    "NB_Moi": {
+                        "hp_start": old_cfg.get("profiles", {}).get("NB_Moi", {}).get("start_point"),
+                        "hp_end": old_cfg.get("profiles", {}).get("NB_Moi", {}).get("end_point"),
+                        "cp_start": old_cfg.get("profiles", {}).get("NB_Moi", {}).get("player_hp_start"), # Фолбэк на ХП для безопасности
+                        "cp_end": old_cfg.get("profiles", {}).get("NB_Moi", {}).get("player_hp_end"),
+                        "mp_start": old_cfg.get("profiles", {}).get("NB_Moi", {}).get("player_mp_start"),
+                        "mp_end": old_cfg.get("profiles", {}).get("NB_Moi", {}).get("player_mp_end")
+                    }
+                }
+            }
+            with open(calibrator_dest, "w", encoding="utf-8") as f:
+                json.dump(calibrator_structure, f, indent=4, ensure_ascii=False)
+            print("  -> Файл calibrator.json успешно сгенерирован на основе старого config.json!")
+        except Exception as e:
+            print(f"  -> [Ошибка] Не удалось распарсить config.json: {e}")
+            
+    print("\n[Успех] Проект version2 собран и готов к работе в изолированном режиме!")
+    print("Выполните запуск: python version2/main.py")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    import json
+    create_project_v2()
+
+
+
+================================================================================
  FILE: setup_wizard.py (194 lines)
 ================================================================================
 
@@ -1656,6 +1763,795 @@ class SummonerCombat:
 
 ================================================================================
  FILE: combat_profiles\__init__.py (0 lines)
+================================================================================
+
+
+
+
+================================================================================
+ FILE: version2\main.py (31 lines)
+================================================================================
+
+# version2/main.py
+import asyncio
+import sys
+import os
+
+# Фиксируем пути импорта, чтобы Python видел модули внутри version2
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+from auto_calibrator.universal_core import UniversalBotCore
+
+async def main():
+    print("=" * 60)
+    print("   ЗАПУСК ОБНОВЛЕННОГО АСИНХРОННОГО ДВИЖКА (ВЕРСИЯ 2)   ")
+    print("=" * 60)
+    
+    # Запускаем движок. Он подтянет calibrator.json и config.json из папки version2
+    bot = UniversalBotCore()
+    
+    try:
+        await bot.run()
+    except KeyboardInterrupt:
+        print("\n[Главный поток] Работа бота успешно остановлена пользователем.")
+    finally:
+        # Безопасное закрытие COM-порта Ардуино при выходе
+        if hasattr(bot, 'arduino') and bot.arduino:
+            bot.arduino.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
+ FILE: version2\arduino\arduino_controller_async.py (109 lines)
+================================================================================
+
+import json
+import asyncio
+import aioserial
+
+class AsyncArduinoController:
+    def __init__(self, config_path: str = "config.json"):
+        self.config_path = config_path
+        self.connection = None
+        self.config = self._load_config()
+        
+        # Извлекаем параметры подключения из конфига
+        conn_settings = self.config.get("connection", {})
+        self.port = conn_settings.get("port", "COM4")
+        self.baudrate = conn_settings.get("baudrate", 115200)
+        self.dtr_setting = conn_settings.get("dtr", True)
+        self.rts_setting = conn_settings.get("rts", True)
+        
+        # Извлекаем карту кнопок
+        self.button_map = self.config.get("buttons", {})
+
+    def _load_config(self) -> dict:
+        """Загружает параметры и карту кнопок из JSON."""
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            print(f"Ошибка: Файл конфигурации '{self.config_path}' не найден!")
+            return {}
+        except json.JSONDecodeError as e:
+            print(f"Ошибка чтения JSON в '{self.config_path}': {e}")
+            return {}
+
+    async def connect(self) -> bool:
+        """Подключается к порту, используя считанные из JSON параметры."""
+        if not self.button_map:
+            print("Ошибка запуска: Конфигурация пуста или не загружена.")
+            return False
+            
+        try:
+            # Инициализация с динамическими параметрами
+            self.connection = aioserial.AioSerial(
+                port=self.port, 
+                baudrate=self.baudrate,
+                dsrdtr=self.dtr_setting,
+                rtscts=self.rts_setting
+            )
+            
+            # Принудительно выставляем DTR/RTS для Leonardo
+            self.connection.dtr = self.dtr_setting
+            self.connection.rts = self.rts_setting
+            
+            print(f"Порт {self.port} ({self.baudrate}) открыт.")
+            print("Ожидаем инициализацию Leonardo...")
+            
+            # Даем плате время на перезагрузку и запуск setup()
+            await asyncio.sleep(2.5)
+            
+            if self.connection.in_waiting > 0:
+                response = await self.connection.readline_async()
+                decoded = response.decode('utf-8', errors='ignore').strip()
+                print(f"Ответ от платы: {decoded}")
+                print("Успешное подключение! Ардуино готова к работе.")
+            else:
+                print("Плата готова (входящий буфер пуст, линии DTR/RTS активны).")
+                
+            return True
+                
+        except Exception as e:
+            print(f"Ошибка подключения к порту {self.port}: {e}")
+            return False
+
+    async def send_button(self, button_name: str):
+        if not self.connection or not self.connection.is_open:
+            print("Ошибка: Нет активного соединения.")
+            return
+            
+        if button_name in self.button_map:
+            # Переводим символ из JSON в байтовую строку непосредственно при отправке
+            char_to_send = self.button_map[button_name]
+            byte_data = char_to_send.encode('utf-8')
+            
+            await self.connection.write_async(byte_data)
+            print(f"Отправлена команда для кнопки: {button_name} (символ: '{char_to_send}')")
+        else:
+            print(f"Кнопка '{button_name}' отсутствует в файле конфигурации.")
+
+    def close(self):
+        if self.connection and self.connection.is_open:
+            self.connection.close()
+            print("Подключение закрыто.")
+
+async def main():
+    # Класс сам подтянет config.json из текущей директории
+    arduino = AsyncArduinoController() 
+    
+    print(f"Инициализация подключения по конфигу...")
+    if not await arduino.connect():
+        return
+    
+    print("Ждем 3 секунд...")
+    await asyncio.sleep(3) 
+    
+    # проверочная отправка команды для кнопки "1" (символ 'с' в config_arduino.json)
+    await arduino.send_button("1")
+    
+    arduino.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+================================================================================
+ FILE: version2\arduino\__init__.py (0 lines)
+================================================================================
+
+
+
+
+================================================================================
+ FILE: version2\auto_calibrator\defense_manager.py (51 lines)
+================================================================================
+
+# auto_calibrator/defense_manager.py
+"""
+полностью изолируем логику использования банок, эликсиров и кулдаунов
+
+"""
+
+
+import asyncio
+import time
+
+
+class DefenseManager:
+    def __init__(self, combat_profile, screen_bus):
+        self.combat_profile = combat_profile
+        self.bus = screen_bus
+        self.is_paused = False
+        self.cooldowns = {}
+
+    def check_cooldown(self, action_id, cooldown_ms) -> bool:
+        now = time.time() * 1000
+        last_time = self.cooldowns.get(action_id, 0)
+        if now - last_time >= cooldown_ms:
+            self.cooldowns[action_id] = now
+            return True
+        return False
+
+    async def hardware_press_log(self, key, label):
+        print(f"[ЗАЩИТА] Прожата кнопка '{key}' -> {label} | Мой HP: {self.bus.states['player_hp']}")
+
+    async def start_loop(self):
+        print("[Защита] Фоновый поток автоматического отхила и банок запущен.")
+        cfg = self.combat_profile.get("consumables_and_defense", {})
+        
+        while True:
+            if self.is_paused:
+                await asyncio.sleep(0.2)
+                continue
+                
+            # Проверка ХП Банок
+            for pot in cfg.get("hp_potions", []):
+                if pot.get("enabled") and self.bus.states["player_hp"] in ["1-20%", "20-40%", "40-60%", "60-80%"]:
+                    if self.check_cooldown(f"hp_pot_{pot['key']}", pot["cooldown_ms"]):
+                        await self.hardware_press_log(pot["key"], "Использование HP Банки")
+
+            # Проверка ЦП Банок
+            for cp_pot in cfg.get("cp_potions", []):
+                if cp_pot.get("enabled") and self.bus.states["player_cp"] in ["1-20%", "20-40%", "40-60%"]:
+                    if self.check_cooldown(f"cp_pot_{cp_pot['key']}", cp_pot["cooldown_ms"]):
+                        await self.hardware_press_log(cp_pot["key"], "Использование CP Банки")
+                        
+            await asyncio.sleep(0.1)
+
+
+
+================================================================================
+ FILE: version2\auto_calibrator\screen_bus.py (85 lines)
+================================================================================
+
+# auto_calibrator/screen_bus.py
+"""
+отвечает за непрерывное чтение экрана и обновление состояния шкал.
+"""
+
+
+import asyncio
+import numpy as np
+from PIL import ImageGrab
+
+
+class ScreenBus:
+    def __init__(self, calibrator_data, combat_profile):
+        self.calibrator_data = calibrator_data
+        self.combat_profile = combat_profile
+        self.is_paused = False
+        
+        # Наше единое глобальное состояние шкал
+        self.states = {
+            "mob_hp": "0% (МЕРТВ)",
+            "player_cp": "100%", "player_hp": "100%", "player_mp": "100%",
+            "summon_hp": "100%", "summon_mp": "100%"
+        }
+
+    def _parse_bar(self, img_np, start_pt, end_pt, bar_type):
+        x1, y1 = start_pt
+        x2, y2 = end_pt
+        h, w, _ = img_np.shape
+        steps = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        active_count = 0
+        
+        for t in steps:
+            x = int(x1 + (x2 - x1) * t)
+            y = int(y1 + (y2 - y1) * t)
+            x = max(0, min(x, w - 1))
+            y = max(0, min(y, h - 1))
+            
+            # Явно преобразуем пиксель в int, чтобы избежать uint8 overflow при сложении
+            r, g, b = map(int, img_np[y, x])
+            
+            if bar_type == "mp" and (b > r + 20 and b > g + 20 and b > 60): active_count += 1
+            elif bar_type == "hp" and (r > b + 25 and r > g + 25 and r > 60): active_count += 1
+            elif bar_type == "cp" and (r > b + 40 and g > b + 20 and r > 100): active_count += 1
+            
+        if active_count == 6: return "100%"
+        if active_count == 5: return "80-100%"
+        if active_count == 4: return "60-80%"
+        if active_count == 3: return "40-60%"
+        if active_count == 2: return "20-40%"
+        if active_count == 1: return "1-20%"
+        return "0% (МЕРТВ)"
+
+    async def start_loop(self):
+        profiles = self.calibrator_data.get("calibrated_profiles", {})
+        has_summon = self.combat_profile.get("features_flags", {}).get("use_summon_logic", False)
+        
+        tasks = [
+            ("target_mob", "hp", "mob_hp"),
+            ("player_status", "cp", "player_cp"),
+            ("player_status", "hp", "player_hp"),
+            ("player_status", "mp", "player_mp")
+        ]
+        if has_summon:
+            tasks.extend([("summon_status", "hp", "summon_hp"), ("summon_status", "mp", "summon_mp")])
+
+        print("[Шина Кадров] Поток непрерывного сканирования экрана запущен.")
+        while True:
+            if self.is_paused:
+                await asyncio.sleep(0.2)
+                continue
+            try:
+                screenshot = ImageGrab.grab(all_screens=True)
+                img_np = np.array(screenshot)
+                
+                for zone, bar, state_key in tasks:
+                    zone_data = profiles.get(zone, {})
+                    start_pt = zone_data.get(f"{bar}_start")
+                    end_pt = zone_data.get(f"{bar}_end")
+                    if start_pt and end_pt:
+                        self.states[state_key] = self._parse_bar(img_np, start_pt, end_pt, bar)
+                
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                print(f"[Ошибка Шины Кадров]: {e}")
+                await asyncio.sleep(1.0)
+
+
+
+================================================================================
+ FILE: version2\auto_calibrator\universal_core.py (214 lines)
+================================================================================
+
+# version2/auto_calibrator/universal_core.py
+import os
+import json
+import asyncio
+import sys
+import time
+
+from auto_calibrator.screen_bus import ScreenBus
+from auto_calibrator.defense_manager import DefenseManager
+
+class UniversalBotCore:
+    def __init__(self, calibrator_name="calibrator.json", profile_name="combat_profile.json"):
+        self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.calibrator_path = os.path.join(self.base_dir, "auto_calibrator", calibrator_name)
+        self.profile_path = os.path.join(self.base_dir, "combat_profiles", profile_name)
+        
+        self.calibrator_data = self._load_json(self.calibrator_path)
+        self.combat_profile = self._load_json(self.profile_path)
+        
+        self.bus = ScreenBus(self.calibrator_data, self.combat_profile)
+        self.defense = DefenseManager(self.combat_profile, self.bus)
+        
+        self.is_paused = False
+        self.spoil_attempted = False
+        self.sweep_done = False
+        self.loot_done = False       # ФЛАГ-ФИКС: Контроль сбора лута с текущего трупа
+        
+        self.is_sitting = False  
+        self.sit_time_start = 0.0 
+        self.last_player_hp = "100%" 
+        
+        self.hp_weights = {
+            "0% (МЕРТВ)": 0, "1-20%": 1, "20-40%": 2, 
+            "40-60%": 3, "60-80%": 4, "80-100%": 5, "100%": 6
+        }
+    def _load_json(self, path):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        print(f"[Критическая Ошибка] Файл не найден: {path}")
+        sys.exit(1)
+
+    async def hardware_press_log(self, key, label):
+        """Единый логгер действий для режима отладки без Ардуины"""
+        print(f"[БОЙ] Нажата кнопка '{key}' -> {label} | МП: {self.bus.states['player_mp']} | ХП Моба: {self.bus.states['mob_hp']}")
+
+    async def hardware_press(self, key, label):
+        """Алиас-заглушка, перенаправляющий вызовы на логгер отладки"""
+        await self.hardware_press_log(key, label)
+
+    async def check_mana_and_rest(self, current_mob_hp):
+        """
+        Утилита контроля маны с защитой от нападения во время отдыха (Пункт 11 ТЗ + Фикс Агров).
+        """
+        cfg = self.combat_profile.get("consumables_and_defense", {}).get("sit_rest_setup", {})
+        core = self.combat_profile.get("core_actions", {})
+        if not cfg.get("enabled"):
+            return False
+
+        current_mp = self.bus.states["player_mp"]
+        current_hp = self.bus.states["player_hp"]
+
+        # ВЕСОВАЯ ПРОВЕРКА НА ПОЛУЧЕНИЕ УРОНА (ЕСЛИ МЫ СИДИМ)
+        if self.is_sitting:
+            weight_now = self.hp_weights.get(current_hp, 6)
+            weight_last = self.hp_weights.get(self.last_player_hp, 6)
+            
+            if weight_now < weight_last:
+                print(f"[ТРЕВОГА] Нас атаковали во время отдыха! ХП упало с {self.last_player_hp} до {current_hp}.")
+                print("[Защита] Игра автоматически подняла персонажа. Отменяем режим отдыха, вступаем в бой!")
+                self.is_sitting = False
+                self.last_player_hp = current_hp
+                
+                # Мгновенно срываемся в контратаку
+                await self.hardware_press_log(core["next_target"]["key"], "ВЫНУЖДЕННЫЙ КОНТР-ТАРГЕТ ПРИ АГРЕ")
+                return False 
+
+            # Запоминаем текущее ХП для следующего кадра внутри отдыха
+            self.last_player_hp = current_hp
+
+            # Встаем только если мана полная И мы отсидели минимум 5 секунд (защита от ложных кадров)
+            if current_mp in ["80-100%", "100%"] and (time.time() - self.sit_time_start >= 5.0):
+                print("[Отдых] Мана полностью восстановлена. Встаем.")
+                await self.hardware_press_log(cfg["sit_stand_key"], "ВСТАТЬ (Завершение отдыха)")
+                self.is_sitting = False
+                await asyncio.sleep(1.2)
+                return False
+            else:
+                if self.defense.check_cooldown("sit_log", 2500):
+                    print(f"[Медитация] Восстановление... Мой HP: {current_hp} | MP: {current_mp}")
+                return True
+
+        # Сохраняем ХП перед потенциальной посадкой
+        self.last_player_hp = current_hp
+
+        # Если мы стоим и мана упала в ноль
+        if current_mp in ["0% (МЕРТВ)", "1-20%"]:
+            # КРИТИЧЕСКИЙ СЛУЧАЙ: если в таргете живой моб (ХП = 100% или ранен)
+            if current_mob_hp != "0% (МЕРТВ)":
+                print("[Отдых] Мана на нулю, но пойман таргет! Экстренный сброс цели через ESC.")
+                await self.hardware_press_log("Esc", "Сброс опасного таргета")
+                
+                # ЖЕСТКИЙ ФИКС: Принудительно очищаем состояние в памяти, обгоняя шину кадров
+                self.bus.states["mob_hp"] = "0% (МЕРТВ)"
+                
+                # Даем игре 400 мс на закрытие интерфейса таргет-бара
+                await asyncio.sleep(0.4)
+                return True 
+
+            # Если цели гарантированно нет — безопасно садимся
+            if current_mob_hp == "0% (МЕРТВ)":
+                print("[Отдых] Поляна чистая. Садимся на реген.")
+                await self.hardware_press_log(cfg["sit_stand_key"], "СЕСТЬ на отдых")
+                self.is_sitting = True
+                self.sit_time_start = time.time() # Запоминаем время посадки
+                await asyncio.sleep(1.2)
+                return True
+
+        return False
+
+    async def combat_main_loop(self):
+        print("[Бой] Главный конечный автомат боевого цикла запущен.")
+        core = self.combat_profile.get("core_actions", {})
+        dwarf = self.combat_profile.get("dwarf_spoiler_logic", {})
+        rotation = self.combat_profile.get("combat_rotation", {})
+        flags = self.combat_profile.get("features_flags", {})
+        
+        while True:
+            if self.is_paused:
+                await asyncio.sleep(0.2)
+                continue
+                
+            current_mob_hp = self.bus.states["mob_hp"]
+
+            if await self.check_mana_and_rest(current_mob_hp):
+                await asyncio.sleep(0.1)
+                continue
+            
+            # --- ФАЗА ПОИСКА, СВИПА И СБОРА ЛУТА ---
+            if current_mob_hp == "0% (МЕРТВ)":
+                # Свипаем только ОДИН раз за смерть моба
+                if flags.get("use_dwarf_logic") and dwarf.get("sweep_setup", {}).get("enabled") and not self.sweep_done:
+                    sweep = dwarf["sweep_setup"]
+                    for _ in range(sweep["clicks_count"]):
+                        await self.hardware_press_log(sweep["key"], "Свип трупа гномом")
+                        await asyncio.sleep(sweep["delay_between_clicks_ms"] / 1000)
+                    self.sweep_done = True
+                    
+                # Лутаем только ОДИН раз за смерть моба (Защита от Loot Spam Deadlock)
+                if flags.get("loot_collection") and not self.loot_done:
+                    loot = core["loot_key"]
+                    for _ in range(loot["clicks_per_mob"]):
+                        await self.hardware_press_log(loot["key"], "Сбор дропа (F1)")
+                        await asyncio.sleep(loot["delay_ms"] / 1000)
+                    self.loot_done = True
+
+                self.spoil_attempted = False
+
+                # УМНЫЙ ПОИСК ЦЕЛИ: нажимаем F2 не бесконечно, а с кулдауном в 500 мс, если спот пуст
+                if self.defense.check_cooldown("empty_spot_f2", 500):
+                    await self.hardware_press_log(core["next_target"]["key"], "Поиск новой цели (F2)")
+                
+                await asyncio.sleep(0.1) 
+                continue
+
+            # --- ФАЗА АКТИВНОГО БОЯ ---
+            # Как только появился живой моб (ХП > 0), сбрасываем все триггеры смерти
+            self.sweep_done = False 
+            self.loot_done = False 
+            self.is_sitting = False 
+            
+            # Прожатие Спойла на старте
+            if flags.get("use_dwarf_logic") and dwarf.get("spoil_setup", {}).get("enabled") and not self.spoil_attempted:
+                spoil = dwarf["spoil_setup"]
+                if spoil["trigger_condition"] == "on_start" and current_mob_hp == "100%":
+                    for _ in range(spoil["max_attempts"]):
+                        await self.hardware_press_log(spoil["key"], "Прожатие СПОЙЛА")
+                        await asyncio.sleep(spoil["delay_between_attempts_ms"] / 1000)
+                    self.spoil_attempted = True
+
+            # Условие Оверхита
+            if current_mob_hp == "1-20%":
+                for oh in rotation.get("overhit_skills", []):
+                    if oh.get("enabled") and self.defense.check_cooldown(f"oh_{oh['key']}", oh["cooldown_ms"]):
+                        await self.hardware_press_log(oh["key"], "💥 ОВЕР-ХИТ (Добивание)")
+
+            # Спам дополнительных атак по кулдаунам
+            for atk in rotation.get("additional_attacks", []):
+                if atk.get("enabled") and self.defense.check_cooldown(f"atk_{atk['key']}", atk["cooldown_ms"]):
+                    await self.hardware_press_log(atk["key"], "Дополнительная атака класса")
+
+            # Обычный нюк / удар в паузах
+            if self.defense.check_cooldown("normal_attack", 600):
+                await self.hardware_press_log(core["normal_attack"]["key"], "Базовая атака / Скилл")
+                
+            await asyncio.sleep(0.1)
+    async def run(self):
+        print("=" * 60)
+        print("   ЗАПУСК МОДУЛЬНОГО АСИНХРОННОГО ДВИЖКА (ОТЛАДКА)   ")
+        print("=" * 60)
+        
+        await asyncio.gather(
+            self.bus.start_loop(),
+            self.defense.start_loop(),
+            self.combat_main_loop()
+        )
+
+if __name__ == "__main__":
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    bot = UniversalBotCore()
+    try:
+        asyncio.run(bot.run())
+    except KeyboardInterrupt:
+        print("\n[Движок] Модульный движок успешно остановлен.")
+
+
+
+================================================================================
+ FILE: version2\auto_calibrator\__init__.py (0 lines)
+================================================================================
+
+
+
+
+================================================================================
+ FILE: version2\combat_profiles\__init__.py (0 lines)
+================================================================================
+
+
+
+
+================================================================================
+ FILE: version2\vision\screen_capture.py (80 lines)
+================================================================================
+
+import os
+import time
+import numpy as np
+import tkinter as tk
+from PIL import ImageGrab, ImageTk, ImageDraw
+
+# Фикс масштабирования Windows
+try:
+    from ctypes import windll
+    windll.user32.SetProcessDPIAware()
+except Exception as e:
+    print("DPI Awareness предупреждение:", e)
+
+class ScreenCapturer:
+    @staticmethod
+    def take_screenshot():
+        """Делает полноэкранный снимок пиксель-в-пиксель."""
+        return ImageGrab.grab(all_screens=True)
+
+    @staticmethod
+    def get_bgr_array(screenshot):
+        """Конвертирует PIL Image в массив BGR для OpenCV."""
+        import cv2
+        return cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+
+    def select_line_on_screen(self):
+        """Открывает стабильное окно Tkinter для калибровки линии."""
+        print("Подготовьте ХП-бар в игре. Калибровка через 1 секунду...")
+        time.sleep(1)
+        
+        screenshot = self.take_screenshot()
+        screen_bgr = self.get_bgr_array(screenshot)
+        
+        root = tk.Tk()
+        root.attributes("-fullscreen", True)
+        root.attributes("-topmost", True)
+        
+        canvas = tk.Canvas(root, cursor="cross", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+        
+        tk_img = ImageTk.PhotoImage(screenshot)
+        canvas.create_image(0, 0, anchor="nw", image=tk_img)
+        
+        start_point = None
+        end_point = None
+        current_line = None
+        
+        def on_press(event):
+            nonlocal current_line, start_point
+            start_point = (event.x, event.y)
+            if current_line:
+                canvas.delete(current_line)
+                
+        def on_drag(event):
+            nonlocal current_line
+            if start_point:
+                if current_line:
+                    canvas.delete(current_line)
+                current_line = canvas.create_line(
+                    start_point[0], start_point[1], 
+                    event.x, event.y, 
+                    fill="red", width=2
+                )
+                
+        def on_release(event):
+            nonlocal end_point
+            end_point = (event.x, event.y)
+            root.destroy()
+
+        canvas.bind("<ButtonPress-1>", on_press)
+        canvas.bind("<B1-Motion>", on_drag)
+        canvas.bind("<ButtonRelease-1>", on_release)
+        
+        print("\n=== КАЛИБРОВКА ===")
+        print("Зажмите ЛКМ в начале ХП-бара, протащите до конца и отпустите.")
+        root.mainloop()
+        
+        if start_point and end_point:
+            return start_point, end_point, screen_bgr
+        raise ValueError("Линия калибровки не была начерчена!")
+
+
+
+================================================================================
+ FILE: version2\vision\target_validator.py (142 lines)
+================================================================================
+
+import cv2
+import json
+import os
+import numpy as np
+import asyncio
+from vision.screen_capture import ScreenCapturer
+
+try:
+    from ctypes import windll
+    windll.user32.SetProcessDPIAware()
+except Exception as e:
+    print("DPI Awareness предупреждение:", e)
+
+class TargetValidator:
+    def __init__(self, profile_name="PK_den4ika", skull_template_name="skull.png", threshold=0.75):
+        self.profile_name = profile_name
+        self.threshold = threshold
+        
+        vision_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config_path = os.path.join(os.path.dirname(vision_dir), "config.json")
+        self.skull_path = os.path.join(vision_dir, skull_template_name)
+        
+        self.bbox = None  
+        self.capturer = ScreenCapturer()
+        self.skull_img = self._load_template()
+
+    def _load_template(self):
+        if os.path.exists(self.skull_path):
+            print("Шаблон черепа успешно загружен:", self.skull_path)
+            return cv2.imread(self.skull_path, cv2.IMREAD_GRAYSCALE)
+        else:
+            print("Внимание! Иконка босса не найдена по пути:", self.skull_path)
+            return None
+
+    def load_profile(self) -> bool:
+        if not os.path.exists(self.config_path):
+            return False
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            bbox = config.get("target_zones", {}).get(self.profile_name)
+            if bbox:
+                self.bbox = tuple(bbox)
+                print("Координаты зоны цели загружены:", self.bbox)
+                return True
+            return False
+        except Exception as e:
+            print("Ошибка при чтении профиля цели:", e)
+            return False
+
+    def _save_profile(self):
+        config = {}
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        if "target_zones" not in config:
+            config["target_zones"] = {}
+        config["target_zones"][self.profile_name] = list(self.bbox)
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+
+    def calibrate_target_zone(self):
+        import tkinter as tk
+        from PIL import ImageTk
+        
+        print("Делаем снимок экрана для калибровки...")
+        import time
+        time.sleep(1)
+        screenshot = self.capturer.take_screenshot()
+        
+        root = tk.Tk()
+        root.attributes("-fullscreen", True)
+        root.attributes("-topmost", True)
+        canvas = tk.Canvas(root, cursor="cross", highlightthickness=0)
+        canvas.pack(fill="both", expand=True)
+        tk_img = ImageTk.PhotoImage(screenshot)
+        canvas.create_image(0, 0, anchor="nw", image=tk_img)
+        
+        start_x, start_y = 0, 0
+        rect_id = None
+        
+        def on_press(event):
+            nonlocal start_x, start_y, rect_id
+            start_x, start_y = event.x, event.y
+            if rect_id: canvas.delete(rect_id)
+        def on_drag(event):
+            nonlocal rect_id
+            if rect_id: canvas.delete(rect_id)
+            rect_id = canvas.create_rectangle(start_x, start_y, event.x, event.y, outline="yellow", width=2)
+        def on_release(event):
+            x = min(start_x, event.x)
+            y = min(start_y, event.y)
+            w = abs(event.x - start_x)
+            h = abs(event.y - start_y)
+            self.bbox = (x, y, w, h)
+            root.destroy()
+
+        canvas.bind("<ButtonPress-1>", on_press)
+        canvas.bind("<B1-Motion>", on_drag)
+        canvas.bind("<ButtonRelease-1>", on_release)
+        root.mainloop()
+        
+        if self.bbox and self.bbox[2] > 5 and self.bbox[3] > 5:
+            self._save_profile()
+        else:
+            raise ValueError("Область цели не была выделена корректно!")
+
+    def _sync_match_template(self, screenshot):
+        frame_gray = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2GRAY)
+        x, y, w, h = self.bbox
+        roi = frame_gray[y:y+h, x:x+w]
+        
+        # --- ДЕБАГ-МАРКЕР: Сохраняем зону поиска в корень проекта ---
+        # Каждый раз при проверке босса файл 'debug_boss_zone.png' будет обновляться.
+        # Открой его и посмотри, виден ли там череп моба.
+        cv2.imwrite("debug_boss_zone.png", roi)
+        # ------------------------------------------------------------
+        
+        if roi.shape[0] < self.skull_img.shape[0] or roi.shape[1] < self.skull_img.shape[1]:
+            return False
+
+        result = cv2.matchTemplate(roi, self.skull_img, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+        
+        # Выведем в консоль реальный коэффициент совпадения для анализа
+        if max_val > 0.4:
+            print(f"[Дебаг Босса] Макс. совпадение с черепом в зоне: {max_val:.2f} / {self.threshold}")
+            
+        return max_val >= self.threshold
+
+    async def is_boss_selected(self) -> bool:
+        if self.skull_img is None or not self.bbox:
+            return False
+
+        loop = asyncio.get_event_loop()
+        screenshot = await loop.run_in_executor(None, self.capturer.take_screenshot)
+        is_boss = await loop.run_in_executor(None, self._sync_match_template, screenshot)
+        
+        return is_boss
+
+
+
+================================================================================
+ FILE: version2\vision\__init__.py (0 lines)
 ================================================================================
 
 
