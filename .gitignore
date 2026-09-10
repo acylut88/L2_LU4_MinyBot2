@@ -12,3 +12,6 @@ env/
 .vscode/
 Thumbs.db
 Desktop.ini
+
+# Дебаф изображения при калибровке экрана и расположении цп/хп/мп - барров
+auto_calibrator\debug_images

@@ -6,19 +6,16 @@ import sys
 import numpy as np
 from PIL import ImageGrab
 
-def load_config(config_name="config_v2.json") -> dict:
+def load_json_file(relative_path) -> dict:
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_path = os.path.join(base_dir, config_name)
-    if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
+    full_path = os.path.join(base_dir, relative_path)
+    if os.path.exists(full_path):
+        with open(full_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    print(f"[Ошибка] Файл конфигурации {config_name} не найден!")
+    print(f"[Ошибка] Файл не найден по пути: {relative_path}")
     sys.exit(1)
 
 def check_bar_points(img_np, start_pt, end_pt, bar_type):
-    """
-    Проверяет 6 точек на линии и вычисляет диапазон процентов здоровья/маны.
-    """
     x1, y1 = start_pt
     x2, y2 = end_pt
     h, w, _ = img_np.shape
@@ -46,10 +43,8 @@ def check_bar_points(img_np, start_pt, end_pt, bar_type):
             
         points_status.append(is_active)
 
-    # Подсчитываем количество горящих точек [+]
     active_count = sum(1 for pt in points_status if pt)
 
-    # === РЕАЛИЗАЦИЯ ЛОГИКИ ДИАПАЗОНОВ ===
     if active_count == 6:
         percent_str = "100%"
     elif active_count == 5:
@@ -61,19 +56,22 @@ def check_bar_points(img_np, start_pt, end_pt, bar_type):
     elif active_count == 2:
         percent_str = "20-40%"
     elif active_count == 1:
-        percent_str = "1-20%"  # Исправлено: теперь это не 0%, моб еще жив!
+        percent_str = "1-20%"
     else:
-        percent_str = "0% (МЕРТВ)" # Железно умер, все точки погасли
+        percent_str = "0% (МЕРТВ)"
 
     return points_status, percent_str
 
 def main():
-    config = load_config()
-    profiles = config.get("calibrated_profiles", {})
-    has_summon = config.get("game_windows", {}).get("has_summon", False)
+    # Загружаем файлы из новых мест расположения
+    calibrator_data = load_json_file(os.path.join("auto_calibrator", "calibrator.json"))
+    combat_data = load_json_file(os.path.join("combat_profiles", "combat_profile.json"))
+    
+    profiles = calibrator_data.get("calibrated_profiles", {})
+    has_summon = combat_data.get("summon_management", {}).get("use_summon_logic", false) or combat_data.get("features_flags", {}).get("use_summon_logic", False)
     
     if not profiles:
-        print("[Ошибка] В конфиге нет откалиброванных профилей шкал.")
+        print("[Ошибка] В calibrator.json нет откалиброванных профилей шкал.")
         return
 
     try:
@@ -108,14 +106,12 @@ def main():
                 if start_pt and end_pt:
                     status_list, percent_text = check_bar_points(img_np, start_pt, end_pt, bar)
                     visual_dots = " ".join(["[+]" if s else "[-]" for s in status_list])
-                    
-                    # Красивое выравнивание вывода по ширине строки процентов
                     output_lines.append(f"[{label}] {percent_text:<10} | Точки: {visual_dots}")
                 else:
-                    output_lines.append(f"[{label}] Не откалиброван в config_v2.json")
+                    output_lines.append(f"[{label}] Не откалиброван в calibrator.json")
 
             sys.stdout.write("\033[H\033[J")
-            sys.stdout.write("=== ТЕКУЩИЙ СТАТУС ПОЛОС В ИГРЕ (ОБНОВЛЕНИЕ НАЛЕТУ) ===\n\n")
+            sys.stdout.write("=== ТЕКУЩИЙ СТАТУС ПОЛОС (ОБНОВЛЕНИЕ С УЧЕТОМ РЕФАКТОРИНГА) ===\n\n")
             sys.stdout.write("\n".join(output_lines) + "\n")
             sys.stdout.flush()
             
