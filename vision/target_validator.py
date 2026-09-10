@@ -113,12 +113,22 @@ class TargetValidator:
         x, y, w, h = self.bbox
         roi = frame_gray[y:y+h, x:x+w]
         
+        # --- ДЕБАГ-МАРКЕР: Сохраняем зону поиска в корень проекта ---
+        # Каждый раз при проверке босса файл 'debug_boss_zone.png' будет обновляться.
+        # Открой его и посмотри, виден ли там череп моба.
+        cv2.imwrite("debug_boss_zone.png", roi)
+        # ------------------------------------------------------------
+        
         if roi.shape[0] < self.skull_img.shape[0] or roi.shape[1] < self.skull_img.shape[1]:
             return False
 
         result = cv2.matchTemplate(roi, self.skull_img, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
         
+        # Выведем в консоль реальный коэффициент совпадения для анализа
+        if max_val > 0.4:
+            print(f"[Дебаг Босса] Макс. совпадение с черепом в зоне: {max_val:.2f} / {self.threshold}")
+            
         return max_val >= self.threshold
 
     async def is_boss_selected(self) -> bool:

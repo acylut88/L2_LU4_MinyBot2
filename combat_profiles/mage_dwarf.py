@@ -20,7 +20,7 @@ class Mage_dwarfCombat:
         self.player_hp_tracker.load_profile()
         self.player_mp_tracker.load_profile()
 
-        self.combat_timeout = 7.0
+        self.combat_timeout = 30.0
         self.search_delay = 0.07
         self.empty_spot_delay = 0.5
         self.f2_fail_count = 0
@@ -133,15 +133,26 @@ class Mage_dwarfCombat:
                                 await self.arduino.send_button("F2")
                                 await asyncio.sleep(0.2)
                                 if self.tracker.get_current_value() > 0:
+                                    # КРИТИЧЕСКИЙ ФИКС: Проверяем перехваченного вблизи моба на босса!
+                                    if await self.validator.is_boss_selected():
+                                        print("[Маяк -> Перехват] ВНИМАНИЕ! На бегу зацепили БОССА! Сброс.")
+                                        await self.arduino.send_button("Esc")
+                                        current_mob_hp = 0
+                                        continue
                                     print("[Маяк] На бегу успешно перехвачен ближний моб! Входим в ближний бой.")
                                     break
-                            continue
+                            
+                            if current_mob_hp == 0:
+                                continue
+                            # Если моб перехвачен и одобрен, проваливаемся сразу в боевой блок
                         else:
                             print("[Маяк] За 1.2 сек ХП-бар цели не отрисовался. Возможно, моб вне зоны видимости. Возврат к F2.")
                             continue
                     
+                    # Штатный поиск цели
                     await self.arduino.send_button("F2")
-                    await asyncio.sleep(self.search_delay)
+                    # Пауза стабилизации (150 мс), чтобы игра успела отрисовать рамку
+                    await asyncio.sleep(0.15) 
                     
                     current_mob_hp = self.tracker.get_current_value()
                     if current_mob_hp == 0:
@@ -149,6 +160,17 @@ class Mage_dwarfCombat:
                         await asyncio.sleep(self.empty_spot_delay)
                         continue
 
+                # === ГЛОБАЛЬНЫЙ ФИКС СИСТЕМЫ ЗАЩИТЫ ОТ БОССОВ ДЛЯ ШТАТНОГО F2 ===
+                # Сюда бот попадает, если моб зацеплен (HP > 0). Проверяем на босса!
+                if current_mob_hp >= 90:
+                    if await self.validator.is_boss_selected():
+                        print("[Защита] ВНИМАНИЕ! Кнопкой F2 обнаружен БОСС или ЧЕМПИОН! Отмена цели...")
+                        await self.arduino.send_button("Esc")
+                        self.f2_fail_count += 1
+                        await asyncio.sleep(0.15) # Микро-пауза, чтобы очистить экран
+                        continue # Мгновенно уходим на новый круг поиска без атаки
+
+                # Если проверка пройдена, сбрасываем фейлы и начинаем бой
                 self.f2_fail_count = 0
 
                 # ФАЗА ИНИЦИАЦИИ
@@ -192,7 +214,9 @@ class Mage_dwarfCombat:
                         await self.arduino.send_button("1")
                         await asyncio.sleep(0.2)
 
+                print("[Бой] Моб успешно уничтожен. Очищаем состояние.\n")
                 await asyncio.sleep(0.1)
+                
             except Exception as e:
                 print(f"[Ошибка] Критический сбой боевого цикла: {e}")
                 await asyncio.sleep(1.0)
