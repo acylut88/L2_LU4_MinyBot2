@@ -1,0 +1,46 @@
+{
+    "profile_meta": {
+        "name": "Mage_Pure_Damage",
+        "description": "Профиль чистого мага: спам нюков, без спойла и вежливости"
+    },
+    "features_flags": {
+        "use_dual_box": false,
+        "skip_damaged_mobs": false,
+        "boss_protection": true,
+        "loot_collection": true,
+        "use_summon_logic": false,
+        "use_dwarf_logic": false
+    },
+    "core_actions": {
+        "normal_attack": {"key": "1", "enabled": true, "comment": "Основной Нюк на кнопке 1"},
+        "next_target": {"key": "F2", "enabled": true},
+        "long_range_pull": {"key": "0", "f2_fails_threshold": 5, "comment": "Маяк дальнего поиска"},
+        "loot_key": {"key": "F1", "clicks_per_mob": 4, "delay_ms": 50, "comment": "Сбор лута"}
+    },
+    "dwarf_spoiler_logic": {
+        "spoil_setup": {"key": "2", "enabled": false},
+        "sweep_setup": {"key": "3", "enabled": false}
+    },
+    "combat_rotation": {
+        "additional_attacks": [
+            {"key": "4", "cooldown_ms": 1200, "enabled": true, "comment": "Второй нюк или атака на 4"}
+        ],
+        "debuffs": [],
+        "vampiric_heal_skill": {"key": "9", "enabled": false},
+        "overhit_skills": [],
+        "corpse_absorption_skill": {"key": "10", "enabled": false}
+    },
+    "consumables_and_defense": {
+        "hp_potions": [
+            {"key": "-", "trigger_my_hp_under": 70, "cooldown_ms": 10000, "enabled": true, "comment": "Оставшиеся ХП банки"}
+        ],
+        "cp_potions": [],
+        "sit_rest_setup": {
+            "enabled": true,
+            "trigger_my_mp_under": 20,
+            "stand_up_at_mp": 80,
+            "sit_stand_key": "Num*",
+            "comment": "Медитация на Num*"
+        }
+    }
+}

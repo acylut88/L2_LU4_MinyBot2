@@ -67,8 +67,8 @@
     },
     "consumables_and_defense": {
         "hp_potions": [
-            {"key": "11", "trigger_my_hp_under": 70, "cooldown_ms": 10000, "enabled": true, "comment": "ХП Банка 1 (Пункт 14)"},
-            {"key": "12", "trigger_my_hp_under": 50, "cooldown_ms": 10000, "enabled": true, "comment": "ХП Банка 2 (Пункт 14)"}
+            {"key": "-", "trigger_my_hp_under": 70, "cooldown_ms": 5000, "enabled": true, "comment": "ХП Банка 1 (Пункт 14)"},
+            {"key": "=", "trigger_my_hp_under": 40, "cooldown_ms": 5000, "enabled": true, "comment": "ХП Банка 2 (Пункт 14)"}
         ],
         "elixirs": {
             "hp_elixir": {"key": "15", "trigger_my_hp_under": 20, "cooldown_ms": 180000, "enabled": true, "comment": "Элик ХП (Пункт 15)"},

@@ -39,7 +39,7 @@ class ApproachControl:
             else:
                 if time.time() - self.approach_start_time >= 7.0:
                     print("[Сближение] Затык в текстуре! Бежим больше 7 секунд без урона.")
-                    await self.core.hardware_press_log("Esc", "Сброс недосягаемого моба")
+                    await self.core.hardware_press("Esc", "Сброс недосягаемого моба")
                     self.core.bus.states["mob_hp"] = "0% (МЕРТВ)"
                     self.is_approaching = False
                     await asyncio.sleep(0.4)
